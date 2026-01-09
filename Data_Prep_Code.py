@@ -1,6 +1,20 @@
 import pandas as pd
 import numpy as np
 from ctgan import CTGAN
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.inspection import permutation_importance
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score, 
+    roc_auc_score, confusion_matrix, roc_curve, auc
+)
 
 def generate_synthetic_data():
     print(" Generating synthetic patient data... \n")
@@ -37,7 +51,6 @@ def generate_synthetic_data():
         "imaging_abnormality": np.random.choice([0, 1], rows),
         "tumor_size_cm": np.round(np.random.uniform(0.5, 10, rows), 2),
         "cancer": np.random.choice([1, 0], size=rows, p=[0.3, 0.7]),
-        
     }
     
     df = pd.DataFrame(data)
@@ -51,16 +64,12 @@ def generate_synthetic_data():
     
     # Save only synthetic data
     synthetic_data.to_csv("AI_Thunderball_Dataset.csv", index=False)
-
     
     print(f"\n Generated: {synthetic_data.shape[0]} records")
     return synthetic_data
 
-generate_synthetic_data()
-
-#Introducing Anomalies
-
 def introduce_anomalies(input_file="AI_Thunderball_Dataset.csv", output_file="AI_Thunderball_RawDataset.csv"):
+    print("\n" + "="*50)
     print("Introducing anomalies...")
     
     try:
@@ -90,6 +99,7 @@ def introduce_anomalies(input_file="AI_Thunderball_Dataset.csv", output_file="AI
     del_idx = df.sample(frac=0.005, random_state=10).index
     df.drop(del_idx, inplace=True)
     print(f"4️. Deletions: -{len(del_idx)}")
+    
     # Save
     df.to_csv(output_file, index=False)
     
@@ -98,13 +108,8 @@ def introduce_anomalies(input_file="AI_Thunderball_Dataset.csv", output_file="AI
     
     return df
 
-introduce_anomalies()
-
-# Cleaning anomalies
-
-
 def clean_data(input_file="AI_Thunderball_RawDataset.csv", output_file="AI_Thunderball_CleanedDataset.csv"):
-
+    print("\n" + "="*50)
     print("Cleaning data...")
     
     try:
@@ -142,7 +147,6 @@ def clean_data(input_file="AI_Thunderball_RawDataset.csv", output_file="AI_Thund
     outliers_removed = before_outliers - len(df)
     print(f"3️. Outliers removed: {outliers_removed}")
     
-   
     if len(df) < 1200:
         needed = 1200 - len(df)
         additional_rows = df.sample(n=needed, replace=True, random_state=42)
@@ -159,13 +163,13 @@ def clean_data(input_file="AI_Thunderball_RawDataset.csv", output_file="AI_Thund
         df = pd.concat([df, additional], ignore_index=True)
     
     # 6. Ensure data types
-    int_cols = ["age", "family_history_cancer", "occupational_exposure",
-                 "wbc_count", "platelet_count",
+    int_cols = ["age", "family_history_cancer", "wbc_count", "platelet_count",
                 "unexplained_weight_loss", "persistent_fatigue", "chronic_pain",
                 "abnormal_bleeding", "persistent_cough", "lump_presence",
-                "imaging_abnormality"]
+                "imaging_abnormality", "diabetes", "hypertension", "asthma", 
+                "cardiac_disease", "prior_radiation_exposure"]
     
-    float_cols = [ "hemoglobin_level", "tumor_marker_level", "tumor_size_cm"]
+    float_cols = ["hemoglobin_level", "tumor_marker_level", "tumor_size_cm"]
     
     for col in int_cols:
         if col in df.columns:
@@ -189,11 +193,10 @@ def clean_data(input_file="AI_Thunderball_RawDataset.csv", output_file="AI_Thund
     
     return df
 
-clean_data()
-
-# Feature Engineering
 def engineer_features(input_file="AI_Thunderball_CleanedDataset.csv", 
                       output_file="AI_Thunderball_FeatureEngineeredDataset.csv"):
+    print("\n" + "="*50)
+    print("Feature Engineering...")
     
     try:
         df = pd.read_csv(input_file)
@@ -201,7 +204,6 @@ def engineer_features(input_file="AI_Thunderball_CleanedDataset.csv",
         print(f" Error: '{input_file}' not found")
         return None
     
-    # Make a copy to preserve original columns
     df_engineered = df.copy()
     
     # 1. BMI (Body Mass Index)
@@ -209,8 +211,8 @@ def engineer_features(input_file="AI_Thunderball_CleanedDataset.csv",
     
     # 2. Age Categories
     df_engineered['age_category'] = pd.cut(df_engineered['age'],
-    bins=[0, 30, 50, 70, 100],
-    labels=['Young', 'Middle-aged', 'Senior', 'Elderly'])
+                                           bins=[0, 30, 50, 70, 100],
+                                           labels=['Young', 'Middle-aged', 'Senior', 'Elderly'])
     
     # 3. Blood Cell Ratios - FIXED: Add small epsilon to avoid division by zero
     df_engineered['platelet_lymphocyte_ratio'] = df_engineered['platelet_count'] / (df_engineered['wbc_count'] * 0.3 + 1e-10)
@@ -330,14 +332,9 @@ def engineer_features(input_file="AI_Thunderball_CleanedDataset.csv",
     print(f" Dataset shape: {df_engineered.shape}")
     
     return df_engineered
-engineer_features()
 
-
-from sklearn.model_selection import train_test_split
-# Train-Test Split (80%-20%)
-def train_test_split_data(
-    input_file="AI_Thunderball_FeatureEngineeredDataset.csv"
-):
+def train_test_split_data(input_file="AI_Thunderball_FeatureEngineeredDataset.csv"):
+    print("\n" + "="*50)
     print("Splitting data into train and test sets...")
 
     df = pd.read_csv(input_file)
@@ -368,4 +365,380 @@ def train_test_split_data(
     print(f" Testing samples : {X_test.shape[0]}")
 
     return X_train, X_test, y_train, y_test
-train_test_split_data()
+
+def train_and_evaluate_models():
+    print("\n" + "="*50)
+    print("Training and evaluating models...")
+    
+    # Load Train-Test Data
+    X_train = pd.read_csv("AI_Thunderball_X_train.csv")
+    X_test  = pd.read_csv("AI_Thunderball_X_test.csv")
+    y_train = pd.read_csv("AI_Thunderball_y_train.csv").values.ravel()
+    y_test  = pd.read_csv("AI_Thunderball_y_test.csv").values.ravel()
+    
+    # Identify feature types
+    categorical_cols = X_train.select_dtypes(include=["object", "category"]).columns
+    numerical_cols   = X_train.select_dtypes(include=["int64", "float64"]).columns
+    
+    # Preprocessing
+    numeric_transformer = Pipeline(steps=[
+        ("scaler", StandardScaler())
+    ])
+    
+    categorical_transformer = Pipeline(steps=[
+        ("onehot", OneHotEncoder(handle_unknown="ignore"))
+    ])
+    
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer, numerical_cols),
+            ("cat", categorical_transformer, categorical_cols)
+        ]
+    )
+    
+    # Models
+    models = {
+        "Logistic Regression": LogisticRegression(max_iter=1000),
+        "Random Forest": RandomForestClassifier(n_estimators=200, random_state=42),
+        "SVM": SVC(kernel="rbf", probability=True, random_state=42),
+        "Gradient Boosting": GradientBoostingClassifier(random_state=42)
+    }
+    
+    # Evaluation Function
+    def evaluate_model(name, model):
+        pipeline = Pipeline(steps=[
+            ("preprocessor", preprocessor),
+            ("model", model)
+        ])
+    
+        pipeline.fit(X_train, y_train)
+    
+        y_pred = pipeline.predict(X_test)
+        y_prob = pipeline.predict_proba(X_test)[:, 1]
+    
+        results = {
+            "Model": name,
+            "Accuracy": accuracy_score(y_test, y_pred),
+            "Precision": precision_score(y_test, y_pred),
+            "Recall": recall_score(y_test, y_pred),
+            "F1 Score": f1_score(y_test, y_pred),
+            "ROC AUC": roc_auc_score(y_test, y_prob),
+            "Confusion Matrix": confusion_matrix(y_test, y_pred),
+            "y_pred": y_pred,
+            "y_prob": y_prob,
+            "pipeline": pipeline
+        }
+    
+        return results
+    
+    # Run all models
+    results = []
+    
+    for name, model in models.items():
+        res = evaluate_model(name, model)
+        results.append(res)
+    
+    # Display Results
+    print("\n" + "="*50)
+    print("MODEL PERFORMANCE RESULTS:")
+    print("="*50)
+    for r in results:
+        print(f"\nModel: {r['Model']}")
+        print(f"  Accuracy : {r['Accuracy']:.4f}")
+        print(f"  Precision: {r['Precision']:.4f}")
+        print(f"  Recall   : {r['Recall']:.4f}")
+        print(f"  F1 Score : {r['F1 Score']:.4f}")
+        print(f"  ROC AUC  : {r['ROC AUC']:.4f}")
+    
+    return results, X_train, preprocessor
+
+def create_visualizations(results, X_train, preprocessor):
+    print("\n" + "="*50)
+    print("Creating visualizations...")
+    
+    # Extract Feature Names (for feature importance)
+    def get_feature_names(preprocessor):
+        feature_names = []
+        for name, transformer, columns in preprocessor.transformers_:
+            if name == "num":
+                feature_names.extend(columns)
+            elif name == "cat":
+                # Get encoded feature names from OneHotEncoder
+                encoder = transformer.named_steps["onehot"]
+                feature_names.extend(encoder.get_feature_names_out(columns))
+        return feature_names
+    
+    # Get Feature Importance for All Models
+    def get_top_features(result, feature_names, top_n=10):
+        """Extract top features based on model type"""
+        pipeline = result['pipeline']
+        model = pipeline.named_steps["model"]
+        model_name = result['Model']
+        
+        if hasattr(model, "feature_importances_"):
+            # Tree-based models (Random Forest, Gradient Boosting)
+            importances = model.feature_importances_
+            indices = np.argsort(importances)[-top_n:][::-1]
+            top_features = [(feature_names[i], importances[i]) for i in indices]
+            ylabel = 'Importance'
+            return top_features, ylabel
+        
+        elif hasattr(model, 'coef_'):
+            # Linear models (Logistic Regression)
+            if len(model.coef_.shape) > 1:
+                coefficients = np.abs(model.coef_[0])
+            else:
+                coefficients = np.abs(model.coef_)
+            
+            indices = np.argsort(coefficients)[-top_n:][::-1]
+            top_features = [(feature_names[i], coefficients[i]) for i in indices]
+            ylabel = 'Absolute Coefficient'
+            return top_features, ylabel
+        
+        else:
+            # For models without built-in feature importance (like RBF SVM)
+            # Use permutation importance
+            print(f"Computing permutation importance for {model_name}...")
+            perm_importance = permutation_importance(
+                pipeline, X_test, y_test, 
+                n_repeats=10, 
+                random_state=42, 
+                n_jobs=-1
+            )
+            importances = perm_importance.importances_mean
+            indices = np.argsort(importances)[-top_n:][::-1]
+            top_features = [(feature_names[i], importances[i]) for i in indices]
+            ylabel = 'Permutation Importance'
+            return top_features, ylabel
+    
+    # Load test data for visualization
+    X_test = pd.read_csv("AI_Thunderball_X_test.csv")
+    y_test = pd.read_csv("AI_Thunderball_y_test.csv").values.ravel()
+    
+    # Fig 1: Model Performance Comparison
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("Model Performance Metrics Comparison", fontsize=16, fontweight='bold')
+    
+    metrics = ["Accuracy", "Precision", "Recall", "F1 Score"]
+    for idx, metric in enumerate(metrics):
+        ax = axes[idx // 2, idx % 2]
+        values = [r[metric] for r in results]
+        colors = plt.cm.viridis(np.linspace(0, 1, len(results)))
+        bars = ax.bar(range(len(results)), values, color=colors)
+        ax.set_ylabel(metric, fontweight='bold')
+        ax.set_xticks(range(len(results)))
+        ax.set_xticklabels([r['Model'] for r in results], rotation=45, ha='right')
+        ax.set_ylim([0, 1])
+        
+        # Add value labels on bars
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.3f}', ha='center', va='bottom', fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig("01_model_performance_comparison.png", dpi=300, bbox_inches='tight')
+    print("✓ Saved: 01_model_performance_comparison.png")
+    plt.show()
+    
+    # Fig 2: Model Ranking by ROC-AUC
+    fig, ax = plt.subplots(figsize=(10, 6))
+    roc_auc_scores = [r['ROC AUC'] for r in results]
+    sorted_indices = np.argsort(roc_auc_scores)[::-1]
+    sorted_names = [results[i]['Model'] for i in sorted_indices]
+    sorted_scores = [roc_auc_scores[i] for i in sorted_indices]
+    
+    colors = plt.cm.RdYlGn(np.linspace(0.3, 0.9, len(sorted_names)))
+    bars = ax.barh(sorted_names, sorted_scores, color=colors)
+    ax.set_xlabel('ROC-AUC Score', fontweight='bold')
+    ax.set_title('Model Ranking by ROC-AUC Score', fontsize=14, fontweight='bold')
+    ax.set_xlim([0, 1])
+    
+    for i, (bar, score) in enumerate(zip(bars, sorted_scores)):
+        ax.text(score - 0.05, bar.get_y() + bar.get_height()/2, f'{score:.4f}',
+                ha='right', va='center', fontweight='bold', color='white')
+    
+    plt.tight_layout()
+    plt.savefig("02_model_ranking_roc_auc.png", dpi=300, bbox_inches='tight')
+    print("✓ Saved: 02_model_ranking_roc_auc.png")
+    plt.show()
+    
+    # Figure 3: Confusion Matrices
+    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+    fig.suptitle("Confusion Matrices for All Models", fontsize=16, fontweight='bold')
+    
+    for idx, result in enumerate(results):
+        ax = axes[idx // 2, idx % 2]
+        cm = result['Confusion Matrix']
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, 
+                    cbar_kws={'label': 'Count'}, annot_kws={'size': 12})
+        ax.set_title(f"{result['Model']}", fontweight='bold')
+        ax.set_ylabel('True Label')
+        ax.set_xlabel('Predicted Label')
+    
+    plt.tight_layout()
+    plt.savefig("03_confusion_matrices.png", dpi=300, bbox_inches='tight')
+    print("✓ Saved: 03_confusion_matrices.png")
+    plt.show()
+    
+    # Figure 4: Correlation Heatmap
+    fig, ax = plt.subplots(figsize=(12, 10))
+    # Only use numerical columns for correlation
+    numerical_data = X_train.select_dtypes(include=["int64", "float64"])
+    correlation_matrix = numerical_data.corr()
+    sns.heatmap(correlation_matrix, cmap='coolwarm', center=0, square=True, 
+                linewidths=0.5, ax=ax, cbar_kws={'label': 'Correlation'})
+    ax.set_title("Feature Correlation Heatmap (Numerical Features)", fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig("04_correlation_heatmap.png", dpi=300, bbox_inches='tight')
+    print("✓ Saved: 04_correlation_heatmap.png")
+    plt.show()
+    
+    # Fig 5: Top Features for All Models
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle("Top 10 Features by Importance/Coefficients (All Models)", fontsize=16, fontweight='bold')
+    axes = axes.flatten()
+    
+    feature_names = get_feature_names(preprocessor)
+    
+    for plot_idx, result in enumerate(results):
+        if plot_idx >= 4:
+            break
+        
+        ax = axes[plot_idx]
+        model_name = result['Model']
+        
+        try:
+            top_features, ylabel = get_top_features(result, feature_names, top_n=10)
+            
+            if top_features:
+                features, values = zip(*top_features)
+                colors = plt.cm.viridis(np.linspace(0, 1, len(features)))
+                ax.barh(range(len(features)), values, color=colors)
+                ax.set_yticks(range(len(features)))
+                ax.set_yticklabels(features)
+                ax.set_xlabel(ylabel, fontweight='bold')
+                ax.set_title(f"{model_name}", fontweight='bold')
+                ax.invert_yaxis()
+                
+                # Add value labels
+                for i, val in enumerate(values):
+                    ax.text(val, i, f' {val:.4f}', va='center', fontsize=9)
+        except Exception as e:
+            ax.text(0.5, 0.5, f'Error computing importance\nfor {model_name}:\n{str(e)}', 
+                    ha='center', va='center', fontsize=10, wrap=True)
+            ax.set_title(f"{model_name}", fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig("05_top_features_importance.png", dpi=300, bbox_inches='tight')
+    print("✓ Saved: 05_top_features_importance.png")
+    plt.show()
+    
+    # Fig 6: Model Performance vs Confusion Matrix Metrics
+    fig, ax = plt.subplots(figsize=(12, 6))
+    model_names = [r['Model'] for r in results]
+    x = np.arange(len(model_names))
+    width = 0.2
+    
+    # Calculate True Positive Rate and False Positive Rate
+    tn = [r['Confusion Matrix'][0, 0] for r in results]
+    fp = [r['Confusion Matrix'][0, 1] for r in results]
+    fn = [r['Confusion Matrix'][1, 0] for r in results]
+    tp = [r['Confusion Matrix'][1, 1] for r in results]
+    
+    # Calculate rates
+    fpr = [fp[i] / (fp[i] + tn[i]) if (fp[i] + tn[i]) > 0 else 0 for i in range(len(results))]
+    tpr = [tp[i] / (tp[i] + fn[i]) if (tp[i] + fn[i]) > 0 else 0 for i in range(len(results))]
+    specificity = [tn[i] / (tn[i] + fp[i]) if (tn[i] + fp[i]) > 0 else 0 for i in range(len(results))]
+    sensitivity = [tp[i] / (tp[i] + fn[i]) if (tp[i] + fn[i]) > 0 else 0 for i in range(len(results))]
+    
+    ax.bar(x - 1.5*width, sensitivity, width, label='Sensitivity (TPR)', alpha=0.8)
+    ax.bar(x - 0.5*width, specificity, width, label='Specificity', alpha=0.8)
+    ax.bar(x + 0.5*width, fpr, width, label='False Positive Rate', alpha=0.8)
+    ax.bar(x + 1.5*width, [r['Accuracy'] for r in results], width, label='Accuracy', alpha=0.8)
+    
+    ax.set_ylabel('Score', fontweight='bold')
+    ax.set_title('Model Performance vs Confusion Matrix Metrics', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(model_names, rotation=45, ha='right')
+    ax.legend()
+    ax.set_ylim([0, 1])
+    
+    plt.tight_layout()
+    plt.savefig("06_performance_vs_matrix_metrics.png", dpi=300, bbox_inches='tight')
+    print("✓ Saved: 06_performance_vs_matrix_metrics.png")
+    plt.show()
+    
+    # Fig 7: ROC-AUC Curves
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    for result in results:
+        y_prob = result['y_prob']
+        fpr_curve, tpr_curve, _ = roc_curve(y_test, y_prob)
+        roc_auc = result['ROC AUC']
+        ax.plot(fpr_curve, tpr_curve, label=f"{result['Model']} (AUC = {roc_auc:.4f})", linewidth=2)
+    
+    # Plot random classifier
+    ax.plot([0, 1], [0, 1], 'k--', linewidth=2, label='Random Classifier (AUC = 0.5000)')
+    ax.set_xlabel('False Positive Rate', fontweight='bold')
+    ax.set_ylabel('True Positive Rate', fontweight='bold')
+    ax.set_title('ROC-AUC Curves for All Models', fontsize=14, fontweight='bold')
+    ax.legend(loc='lower right', fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
+    
+    plt.tight_layout()
+    plt.savefig("07_roc_auc_curves.png", dpi=300, bbox_inches='tight')
+    print(" Saved: 07_roc_auc_curves.png")
+    plt.show()
+    
+    print("\n" + "="*50)
+    print(" All visualizations have been saved successfully!")
+    print("="*50)
+
+def main():
+    print("="*60)
+    print("AI THUNDERBALL: COMPLETE DATA PIPELINE")
+    print("="*60)
+    
+    # Step 1: Generate synthetic data
+    print("\n Generating synthetic data...")
+    generate_synthetic_data()
+    
+    # Step 2: Introduce anomalies
+    print("\n Introducing anomalies...")
+    introduce_anomalies()
+    
+    # Step 3: Clean data
+    print("\n Cleaning data...")
+    clean_data()
+    
+    # Step 4: Feature engineering
+    print("\n Engineering features...")
+    engineer_features()
+    
+    # Step 5: Train-test split
+    print("\n Splitting data...")
+    train_test_split_data()
+    
+    # Step 6: Train and evaluate models
+    print("\n Training models and creating visualizations...")
+    results, X_train, preprocessor = train_and_evaluate_models()
+    
+    # Step 7: Create visualizations
+    create_visualizations(results, X_train, preprocessor)
+    
+    
+    print("PIPELINE COMPLETED SUCCESSFULLY!")
+    print("="*60)
+    print("\nGenerated Files:")
+    print("1. AI_Thunderball_Dataset.csv - Original synthetic data")
+    print("2. AI_Thunderball_RawDataset.csv - Data with anomalies")
+    print("3. AI_Thunderball_CleanedDataset.csv - Cleaned data")
+    print("4. AI_Thunderball_FeatureEngineeredDataset.csv - Data with engineered features")
+    print("5. AI_Thunderball_X_train.csv / X_test.csv - Train/test features")
+    print("6. AI_Thunderball_y_train.csv / y_test.csv - Train/test labels")
+    print("7. 01-07_*.png - Model evaluation visualizations")
+
+main()
