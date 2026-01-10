@@ -1,13 +1,13 @@
-# 🧬 Cancer Cell Prediction Using Machine Learning
+# Cancer Cell Prediction Using Machine Learning
 
-## 📌 Project Overview
+## Project Overview
 Cancer is one of the leading causes of death worldwide. Early detection of cancer cells plays a crucial role in increasing survival rates and improving treatment outcomes.
 
 This project focuses on predicting whether a tumor is **benign** or **malignant** using machine learning techniques based on medical diagnostic data. The system analyzes cell features and provides accurate predictions to assist doctors and healthcare professionals in decision-making.
 
 ---
 
-## 🎯 Objectives
+## Objectives
 - Build a machine learning model to predict cancer cells accurately
 - Classify tumors as **Benign (Non-cancerous)** or **Malignant (Cancerous)**
 - Reduce human error in early cancer diagnosis
@@ -15,12 +15,12 @@ This project focuses on predicting whether a tumor is **benign** or **malignant*
 
 ---
 
-## 🧠 Problem Statement
+## Problem Statement
 Manual diagnosis of cancer based on biopsy reports can be time-consuming and prone to human error. There is a need for an automated, reliable, and fast system that can predict cancer cells using patient data and machine learning algorithms.
 
 ---
 
-## 📂 Dataset
+## Dataset
 - **Dataset Name:** Breast Cancer Wisconsin Dataset
 - **Source:** UCI Machine Learning Repository / Kaggle
 - **Description:**
@@ -29,14 +29,14 @@ Manual diagnosis of cancer based on biopsy reports can be time-consuming and pro
 
 ---
 
-## ⚙️ Technologies Used
+## Technologies Used
 - **Language:** Python
-- **Libraries:** NumPy, Pandas, Matplotlib, Seaborn, Scikit-learn
-- **Tools:** Jupyter Notebook / VS Code
+- **Libraries:** NumPy, Pandas, CTGaN, Seaborn, Scikit-learn
+- **Tools:** VS Code
 
 ---
 
-## 🧪 Machine Learning Algorithms
+## Machine Learning Algorithms
 - Logistic Regression
 - Support Vector Machine (SVM)
 - Random Forest Classifier
@@ -57,26 +57,3 @@ Manual diagnosis of cancer based on biopsy reports can be time-consuming and pro
 ## 📊 Results
 - High accuracy in cancer cell prediction
 - Effective classification of tumors
-
----
-
-## 👥 Team Members
-- Team Member 1 – Data Preprocessing
-- Team Member 2 – Model Training
-- Team Member 3 – Evaluation
-- Team Member 4 – Documentation
-
----
-
-## 🚀 How to Run
-```bash
-git clone https://github.com/your-username/cancer-cell-prediction.git
-cd cancer-cell-prediction
-pip install -r requirements.txt
-python main.py
-```
-
----
-
-## 📜 License
-Educational use only.
