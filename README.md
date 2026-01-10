@@ -44,7 +44,7 @@ Manual diagnosis of cancer based on biopsy reports can be time-consuming and pro
 
 ---
 
-## 🔁 Workflow
+## Workflow
 1. Data Collection
 2. Data Preprocessing
 3. Exploratory Data Analysis
@@ -54,6 +54,6 @@ Manual diagnosis of cancer based on biopsy reports can be time-consuming and pro
 
 ---
 
-## 📊 Results
+## Results
 - High accuracy in cancer cell prediction
 - Effective classification of tumors
