@@ -20,15 +20,6 @@ Manual diagnosis of cancer based on biopsy reports can be time-consuming and pro
 
 ---
 
-## Dataset
-- **Dataset Name:** Breast Cancer Wisconsin Dataset
-- **Source:** UCI Machine Learning Repository / Kaggle
-- **Description:**
-  - Features extracted from breast mass biopsy images
-  - Labeled as **Benign** or **Malignant**
-
----
-
 ## Technologies Used
 - **Language:** Python
 - **Libraries:** NumPy, Pandas, CTGaN, Seaborn, Scikit-learn
