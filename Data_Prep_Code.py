@@ -3,7 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from ctgan import CTGAN
-from sklearn.model_selection import train_test_split, KFold, cross_val_score
+from sklearn.model_selection import train_test_split, KFold, cross_val_score, GridSearchCV, RandomizedSearchCV, StratifiedKFold
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -423,6 +424,544 @@ def get_top_features(result, feature_names, top_n=10):
         ylabel = 'Permutation Importance'
         return top_features, ylabel
 
+def pca_analysis(X_train, y_train, X_test, y_test, preprocessor, variance_threshold=0.95):
+    """
+    Perform PCA (Principal Component Analysis) for dimensionality reduction.
+    
+    Parameters:
+    - variance_threshold: Minimum cumulative explained variance ratio to retain (default 0.95 = 95%)
+    
+    Returns:
+    - pca_results: Dictionary with PCA analysis results
+    - X_train_pca: Transformed training data
+    - X_test_pca: Transformed test data
+    """
+    print("\n" + "="*60)
+    print("PCA - DIMENSIONALITY REDUCTION ANALYSIS")
+    print("="*60)
+    
+    # First, we need to preprocess the data (scale numerical, encode categorical)
+    print("\n[1/6] Preprocessing data for PCA...")
+    
+    # Fit preprocessor on training data
+    X_train_processed = preprocessor.fit_transform(X_train)
+    X_test_processed = preprocessor.transform(X_test)
+    
+    # Convert to dense array if sparse
+    if hasattr(X_train_processed, 'toarray'):
+        X_train_processed = X_train_processed.toarray()
+        X_test_processed = X_test_processed.toarray()
+    
+    n_features_original = X_train_processed.shape[1]
+    print(f"     Original features: {n_features_original}")
+    
+    # =========================================================
+    # Step 1: Full PCA to analyze variance
+    # =========================================================
+    print("\n[2/6] Analyzing variance with full PCA...")
+    
+    pca_full = PCA()
+    pca_full.fit(X_train_processed)
+    
+    cumulative_variance = np.cumsum(pca_full.explained_variance_ratio_)
+    
+    # Find optimal number of components for threshold
+    n_components_optimal = np.argmax(cumulative_variance >= variance_threshold) + 1
+    if n_components_optimal == 1 and cumulative_variance[0] < variance_threshold:
+        n_components_optimal = len(cumulative_variance)
+    
+    print(f"     Components for {variance_threshold*100:.0f}% variance: {n_components_optimal}")
+    print(f"     Dimensionality reduction: {n_features_original} → {n_components_optimal} ({(1-n_components_optimal/n_features_original)*100:.1f}% reduction)")
+    
+    # =========================================================
+    # Step 2: Apply optimal PCA
+    # =========================================================
+    print("\n[3/6] Applying PCA with optimal components...")
+    
+    pca_optimal = PCA(n_components=n_components_optimal)
+    X_train_pca = pca_optimal.fit_transform(X_train_processed)
+    X_test_pca = pca_optimal.transform(X_test_processed)
+    
+    print(f"     Training data shape: {X_train_processed.shape} → {X_train_pca.shape}")
+    print(f"     Test data shape: {X_test_processed.shape} → {X_test_pca.shape}")
+    print(f"     Explained variance: {sum(pca_optimal.explained_variance_ratio_)*100:.2f}%")
+    
+    # =========================================================
+    # Step 3: Visualize explained variance
+    # =========================================================
+    print("\n[4/6] Creating PCA visualizations...")
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+    fig.suptitle("PCA Dimensionality Reduction Analysis", fontsize=16, fontweight='bold')
+    
+    # Plot 1: Scree plot (Individual variance)
+    ax1 = axes[0, 0]
+    components_to_show = min(20, len(pca_full.explained_variance_ratio_))
+    ax1.bar(range(1, components_to_show + 1), 
+            pca_full.explained_variance_ratio_[:components_to_show] * 100,
+            alpha=0.8, color='#3498db', label='Individual')
+    ax1.plot(range(1, components_to_show + 1), 
+             cumulative_variance[:components_to_show] * 100,
+             'r-o', linewidth=2, markersize=6, label='Cumulative')
+    ax1.axhline(y=variance_threshold * 100, color='green', linestyle='--', 
+                linewidth=2, label=f'{variance_threshold*100:.0f}% Threshold')
+    ax1.axvline(x=n_components_optimal, color='orange', linestyle='--', 
+                linewidth=2, label=f'Optimal: {n_components_optimal} components')
+    ax1.set_xlabel('Principal Component', fontweight='bold')
+    ax1.set_ylabel('Explained Variance (%)', fontweight='bold')
+    ax1.set_title('Scree Plot: Explained Variance by Component', fontweight='bold')
+    ax1.legend(loc='center right')
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Cumulative variance
+    ax2 = axes[0, 1]
+    ax2.fill_between(range(1, len(cumulative_variance) + 1), 
+                     cumulative_variance * 100, 
+                     alpha=0.3, color='#2ecc71')
+    ax2.plot(range(1, len(cumulative_variance) + 1), 
+             cumulative_variance * 100, 
+             'g-', linewidth=2)
+    ax2.axhline(y=variance_threshold * 100, color='red', linestyle='--', 
+                linewidth=2, label=f'{variance_threshold*100:.0f}% Threshold')
+    ax2.axvline(x=n_components_optimal, color='orange', linestyle='--', 
+                linewidth=2, label=f'Optimal: {n_components_optimal}')
+    ax2.set_xlabel('Number of Components', fontweight='bold')
+    ax2.set_ylabel('Cumulative Explained Variance (%)', fontweight='bold')
+    ax2.set_title('Cumulative Variance Explained', fontweight='bold')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim([1, min(50, len(cumulative_variance))])
+    ax2.set_ylim([0, 105])
+    
+    # Plot 3: 2D PCA projection
+    ax3 = axes[1, 0]
+    scatter = ax3.scatter(X_train_pca[:, 0], X_train_pca[:, 1], 
+                          c=y_train, cmap='RdYlBu', alpha=0.6, 
+                          edgecolors='black', linewidth=0.5)
+    ax3.set_xlabel(f'PC1 ({pca_optimal.explained_variance_ratio_[0]*100:.1f}%)', fontweight='bold')
+    ax3.set_ylabel(f'PC2 ({pca_optimal.explained_variance_ratio_[1]*100:.1f}%)', fontweight='bold')
+    ax3.set_title('2D PCA Projection (Training Data)', fontweight='bold')
+    cbar = plt.colorbar(scatter, ax=ax3)
+    cbar.set_label('Cancer (0=No, 1=Yes)', fontweight='bold')
+    ax3.grid(True, alpha=0.3)
+    
+    # Plot 4: Component loadings heatmap (top 10 features for first 5 PCs)
+    ax4 = axes[1, 1]
+    n_pcs_to_show = min(5, n_components_optimal)
+    
+    # Get feature names from preprocessor
+    feature_names = []
+    for name, transformer, columns in preprocessor.transformers_:
+        if name == "num":
+            feature_names.extend(columns)
+        elif name == "cat":
+            encoder = transformer.named_steps["onehot"]
+            feature_names.extend(encoder.get_feature_names_out(columns))
+    
+    # Get top features for each PC based on absolute loadings
+    loadings = pd.DataFrame(
+        pca_optimal.components_[:n_pcs_to_show].T,
+        columns=[f'PC{i+1}' for i in range(n_pcs_to_show)],
+        index=feature_names[:len(pca_optimal.components_[0])]
+    )
+    
+    # Select top features by maximum absolute loading across all PCs
+    top_features_idx = loadings.abs().max(axis=1).nlargest(15).index
+    loadings_top = loadings.loc[top_features_idx]
+    
+    sns.heatmap(loadings_top, annot=True, fmt='.2f', cmap='RdBu_r', 
+                center=0, ax=ax4, cbar_kws={'label': 'Loading'})
+    ax4.set_title('PCA Component Loadings (Top 15 Features)', fontweight='bold')
+    ax4.set_xlabel('Principal Component', fontweight='bold')
+    ax4.set_ylabel('Feature', fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig("09_pca_analysis.png", dpi=300, bbox_inches='tight')
+    print("     ✓ Saved: 09_pca_analysis.png")
+    plt.show()
+    
+    # =========================================================
+    # Step 4: Compare model performance with/without PCA
+    # =========================================================
+    print("\n[5/6] Comparing model performance with vs without PCA...")
+    
+    # Models to compare
+    models = {
+        "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
+        "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42),
+        "Gradient Boosting": GradientBoostingClassifier(n_estimators=100, random_state=42)
+    }
+    
+    comparison_results = []
+    
+    for name, model in models.items():
+        # Without PCA (using preprocessed data)
+        model_no_pca = model.__class__(**model.get_params())
+        model_no_pca.fit(X_train_processed, y_train)
+        pred_no_pca = model_no_pca.predict(X_test_processed)
+        prob_no_pca = model_no_pca.predict_proba(X_test_processed)[:, 1]
+        
+        acc_no_pca = accuracy_score(y_test, pred_no_pca)
+        roc_no_pca = roc_auc_score(y_test, prob_no_pca)
+        
+        # With PCA
+        model_pca = model.__class__(**model.get_params())
+        model_pca.fit(X_train_pca, y_train)
+        pred_pca = model_pca.predict(X_test_pca)
+        prob_pca = model_pca.predict_proba(X_test_pca)[:, 1]
+        
+        acc_pca = accuracy_score(y_test, pred_pca)
+        roc_pca = roc_auc_score(y_test, prob_pca)
+        
+        comparison_results.append({
+            "Model": name,
+            "Accuracy_NoPCA": acc_no_pca,
+            "Accuracy_PCA": acc_pca,
+            "Accuracy_Diff": acc_pca - acc_no_pca,
+            "ROC_AUC_NoPCA": roc_no_pca,
+            "ROC_AUC_PCA": roc_pca,
+            "ROC_AUC_Diff": roc_pca - roc_no_pca,
+            "Features_NoPCA": n_features_original,
+            "Features_PCA": n_components_optimal
+        })
+        
+        print(f"     {name}:")
+        print(f"       Without PCA - Accuracy: {acc_no_pca:.4f}, ROC-AUC: {roc_no_pca:.4f}")
+        print(f"       With PCA    - Accuracy: {acc_pca:.4f}, ROC-AUC: {roc_pca:.4f}")
+    
+    # =========================================================
+    # Step 5: Comparison visualization
+    # =========================================================
+    print("\n[6/6] Creating comparison visualization...")
+    
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig.suptitle("Model Performance: With vs Without PCA", fontsize=14, fontweight='bold')
+    
+    model_names = [r['Model'] for r in comparison_results]
+    x = np.arange(len(model_names))
+    width = 0.35
+    
+    # Accuracy comparison
+    ax1 = axes[0]
+    acc_no_pca = [r['Accuracy_NoPCA'] for r in comparison_results]
+    acc_pca = [r['Accuracy_PCA'] for r in comparison_results]
+    bars1 = ax1.bar(x - width/2, acc_no_pca, width, label='Without PCA', alpha=0.8, color='#3498db')
+    bars2 = ax1.bar(x + width/2, acc_pca, width, label='With PCA', alpha=0.8, color='#e74c3c')
+    ax1.set_ylabel('Accuracy', fontweight='bold')
+    ax1.set_title('Accuracy Comparison', fontweight='bold')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(model_names, rotation=45, ha='right')
+    ax1.legend()
+    ax1.set_ylim([0.5, 1.0])
+    for bar in bars1:
+        ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{bar.get_height():.3f}',
+                 ha='center', va='bottom', fontsize=9)
+    for bar in bars2:
+        ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{bar.get_height():.3f}',
+                 ha='center', va='bottom', fontsize=9)
+    
+    # ROC-AUC comparison  
+    ax2 = axes[1]
+    roc_no_pca = [r['ROC_AUC_NoPCA'] for r in comparison_results]
+    roc_pca = [r['ROC_AUC_PCA'] for r in comparison_results]
+    bars3 = ax2.bar(x - width/2, roc_no_pca, width, label='Without PCA', alpha=0.8, color='#3498db')
+    bars4 = ax2.bar(x + width/2, roc_pca, width, label='With PCA', alpha=0.8, color='#e74c3c')
+    ax2.set_ylabel('ROC-AUC', fontweight='bold')
+    ax2.set_title('ROC-AUC Comparison', fontweight='bold')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(model_names, rotation=45, ha='right')
+    ax2.legend()
+    ax2.set_ylim([0.5, 1.0])
+    for bar in bars3:
+        ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{bar.get_height():.3f}',
+                 ha='center', va='bottom', fontsize=9)
+    for bar in bars4:
+        ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{bar.get_height():.3f}',
+                 ha='center', va='bottom', fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig("10_pca_model_comparison.png", dpi=300, bbox_inches='tight')
+    print("     ✓ Saved: 10_pca_model_comparison.png")
+    plt.show()
+    
+    # Save results to CSV
+    results_df = pd.DataFrame(comparison_results)
+    results_df.to_csv("pca_comparison_results.csv", index=False)
+    print("     ✓ Saved: pca_comparison_results.csv")
+    
+    # Summary
+    print("\n" + "="*60)
+    print("PCA ANALYSIS SUMMARY")
+    print("="*60)
+    print(f"\n  Original Features: {n_features_original}")
+    print(f"  PCA Components: {n_components_optimal}")
+    print(f"  Variance Retained: {sum(pca_optimal.explained_variance_ratio_)*100:.2f}%")
+    print(f"  Dimensionality Reduction: {(1-n_components_optimal/n_features_original)*100:.1f}%")
+    
+    print(f"\n  {'Model':<25} {'Δ Accuracy':<15} {'Δ ROC-AUC':<15}")
+    print("  " + "-" * 55)
+    for r in comparison_results:
+        acc_diff = f"+{r['Accuracy_Diff']:.4f}" if r['Accuracy_Diff'] >= 0 else f"{r['Accuracy_Diff']:.4f}"
+        roc_diff = f"+{r['ROC_AUC_Diff']:.4f}" if r['ROC_AUC_Diff'] >= 0 else f"{r['ROC_AUC_Diff']:.4f}"
+        print(f"  {r['Model']:<25} {acc_diff:<15} {roc_diff:<15}")
+    
+    pca_results = {
+        "n_components_optimal": n_components_optimal,
+        "n_features_original": n_features_original,
+        "explained_variance": sum(pca_optimal.explained_variance_ratio_),
+        "pca_model": pca_optimal,
+        "comparison_results": comparison_results,
+        "component_loadings": loadings
+    }
+    
+    return pca_results, X_train_pca, X_test_pca
+
+def hyperparameter_tuning(X_train, y_train, X_test, y_test, preprocessor):
+    """
+    Perform hyperparameter tuning on all models using GridSearchCV and RandomizedSearchCV.
+    Returns optimized models with best parameters.
+    """
+    print("\n" + "="*60)
+    print("HYPERPARAMETER TUNING")
+    print("="*60)
+    
+    # Define hyperparameter grids for each model
+    param_grids = {
+        "Logistic Regression": {
+            'model__C': [0.001, 0.01, 0.1, 1, 10, 100],
+            'model__penalty': ['l2'],
+            'model__solver': ['lbfgs', 'liblinear'],
+            'model__max_iter': [1000, 2000]
+        },
+        "Random Forest": {
+            'model__n_estimators': [100, 200, 300, 500],
+            'model__max_depth': [None, 10, 20, 30, 50],
+            'model__min_samples_split': [2, 5, 10],
+            'model__min_samples_leaf': [1, 2, 4],
+            'model__max_features': ['sqrt', 'log2'],
+            'model__bootstrap': [True, False]
+        },
+        "SVM": {
+            'model__C': [0.1, 1, 10, 100],
+            'model__kernel': ['rbf', 'poly', 'sigmoid'],
+            'model__gamma': ['scale', 'auto', 0.01, 0.1, 1]
+        },
+        "Gradient Boosting": {
+            'model__n_estimators': [100, 200, 300],
+            'model__learning_rate': [0.01, 0.05, 0.1, 0.2],
+            'model__max_depth': [3, 5, 7, 10],
+            'model__min_samples_split': [2, 5, 10],
+            'model__min_samples_leaf': [1, 2, 4],
+            'model__subsample': [0.8, 0.9, 1.0]
+        }
+    }
+    
+    # Base models for comparison
+    base_models = {
+        "Logistic Regression": LogisticRegression(max_iter=1000),
+        "Random Forest": RandomForestClassifier(n_estimators=200, random_state=42),
+        "SVM": SVC(kernel="rbf", probability=True, random_state=42),
+        "Gradient Boosting": GradientBoostingClassifier(random_state=42)
+    }
+    
+    # Stratified K-Fold for cross-validation
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    
+    tuning_results = []
+    best_models = {}
+    
+    for name, model in base_models.items():
+        print(f"\n{'─'*50}")
+        print(f"Tuning: {name}")
+        print(f"{'─'*50}")
+        
+        # Create pipeline
+        pipeline = Pipeline(steps=[
+            ("preprocessor", preprocessor),
+            ("model", model)
+        ])
+        
+        # Get baseline performance
+        print("  [1/3] Evaluating baseline model...")
+        pipeline.fit(X_train, y_train)
+        baseline_pred = pipeline.predict(X_test)
+        baseline_prob = pipeline.predict_proba(X_test)[:, 1]
+        baseline_roc = roc_auc_score(y_test, baseline_prob)
+        baseline_acc = accuracy_score(y_test, baseline_pred)
+        baseline_f1 = f1_score(y_test, baseline_pred)
+        
+        print(f"       Baseline ROC-AUC: {baseline_roc:.4f}")
+        print(f"       Baseline Accuracy: {baseline_acc:.4f}")
+        
+        # Use RandomizedSearchCV for larger parameter spaces
+        param_grid = param_grids[name]
+        n_combinations = 1
+        for values in param_grid.values():
+            n_combinations *= len(values)
+        
+        print(f"  [2/3] Searching {n_combinations} parameter combinations...")
+        
+        if n_combinations > 100:
+            # Use RandomizedSearchCV for large search spaces
+            search = RandomizedSearchCV(
+                pipeline,
+                param_distributions=param_grid,
+                n_iter=50,
+                cv=cv,
+                scoring='roc_auc',
+                n_jobs=-1,
+                verbose=0,
+                random_state=42
+            )
+        else:
+            # Use GridSearchCV for smaller search spaces
+            search = GridSearchCV(
+                pipeline,
+                param_grid=param_grid,
+                cv=cv,
+                scoring='roc_auc',
+                n_jobs=-1,
+                verbose=0
+            )
+        
+        search.fit(X_train, y_train)
+        
+        # Get tuned performance
+        print("  [3/3] Evaluating tuned model...")
+        tuned_pred = search.predict(X_test)
+        tuned_prob = search.predict_proba(X_test)[:, 1]
+        tuned_roc = roc_auc_score(y_test, tuned_prob)
+        tuned_acc = accuracy_score(y_test, tuned_pred)
+        tuned_f1 = f1_score(y_test, tuned_pred)
+        
+        improvement_roc = tuned_roc - baseline_roc
+        improvement_acc = tuned_acc - baseline_acc
+        improvement_f1 = tuned_f1 - baseline_f1
+        
+        print(f"       Tuned ROC-AUC: {tuned_roc:.4f} ({'+' if improvement_roc >= 0 else ''}{improvement_roc:.4f})")
+        print(f"       Tuned Accuracy: {tuned_acc:.4f} ({'+' if improvement_acc >= 0 else ''}{improvement_acc:.4f})")
+        print(f"       CV Best Score: {search.best_score_:.4f}")
+        
+        # Store best parameters (clean up the 'model__' prefix)
+        best_params_clean = {k.replace('model__', ''): v for k, v in search.best_params_.items()}
+        print(f"       Best Parameters: {best_params_clean}")
+        
+        tuning_results.append({
+            "Model": name,
+            "Baseline_Accuracy": baseline_acc,
+            "Tuned_Accuracy": tuned_acc,
+            "Accuracy_Improvement": improvement_acc,
+            "Baseline_ROC_AUC": baseline_roc,
+            "Tuned_ROC_AUC": tuned_roc,
+            "ROC_AUC_Improvement": improvement_roc,
+            "Baseline_F1": baseline_f1,
+            "Tuned_F1": tuned_f1,
+            "F1_Improvement": improvement_f1,
+            "CV_Score": search.best_score_,
+            "Best_Parameters": str(best_params_clean),
+            "y_pred": tuned_pred,
+            "y_prob": tuned_prob,
+            "pipeline": search.best_estimator_
+        })
+        
+        best_models[name] = search.best_estimator_
+    
+    # Summary
+    print("\n" + "="*60)
+    print("HYPERPARAMETER TUNING SUMMARY")
+    print("="*60)
+    
+    print(f"\n{'Model':<25} {'Baseline':<12} {'Tuned':<12} {'Improvement':<12}")
+    print("-" * 65)
+    for r in tuning_results:
+        imp_str = f"+{r['ROC_AUC_Improvement']:.4f}" if r['ROC_AUC_Improvement'] >= 0 else f"{r['ROC_AUC_Improvement']:.4f}"
+        print(f"{r['Model']:<25} {r['Baseline_ROC_AUC']:<12.4f} {r['Tuned_ROC_AUC']:<12.4f} {imp_str:<12}")
+    
+    # Find best overall model
+    best_result = max(tuning_results, key=lambda x: x['Tuned_ROC_AUC'])
+    print(f"\n🏆 Best Model: {best_result['Model']} with ROC-AUC = {best_result['Tuned_ROC_AUC']:.4f}")
+    
+    # Create visualization
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig.suptitle("Hyperparameter Tuning Results: Baseline vs Tuned", fontsize=14, fontweight='bold')
+    
+    model_names = [r['Model'] for r in tuning_results]
+    x = np.arange(len(model_names))
+    width = 0.35
+    
+    # ROC-AUC comparison
+    ax1 = axes[0]
+    baseline_rocs = [r['Baseline_ROC_AUC'] for r in tuning_results]
+    tuned_rocs = [r['Tuned_ROC_AUC'] for r in tuning_results]
+    bars1 = ax1.bar(x - width/2, baseline_rocs, width, label='Baseline', alpha=0.8, color='#3498db')
+    bars2 = ax1.bar(x + width/2, tuned_rocs, width, label='Tuned', alpha=0.8, color='#2ecc71')
+    ax1.set_ylabel('ROC-AUC Score', fontweight='bold')
+    ax1.set_title('ROC-AUC: Baseline vs Tuned', fontweight='bold')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(model_names, rotation=45, ha='right')
+    ax1.legend()
+    ax1.set_ylim([0.4, 1.0])
+    for bar in bars1 + bars2:
+        ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{bar.get_height():.3f}',
+                 ha='center', va='bottom', fontsize=8)
+    
+    # Accuracy comparison
+    ax2 = axes[1]
+    baseline_accs = [r['Baseline_Accuracy'] for r in tuning_results]
+    tuned_accs = [r['Tuned_Accuracy'] for r in tuning_results]
+    bars3 = ax2.bar(x - width/2, baseline_accs, width, label='Baseline', alpha=0.8, color='#3498db')
+    bars4 = ax2.bar(x + width/2, tuned_accs, width, label='Tuned', alpha=0.8, color='#2ecc71')
+    ax2.set_ylabel('Accuracy', fontweight='bold')
+    ax2.set_title('Accuracy: Baseline vs Tuned', fontweight='bold')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(model_names, rotation=45, ha='right')
+    ax2.legend()
+    ax2.set_ylim([0.4, 1.0])
+    for bar in bars3 + bars4:
+        ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{bar.get_height():.3f}',
+                 ha='center', va='bottom', fontsize=8)
+    
+    # Improvement chart
+    ax3 = axes[2]
+    improvements = [r['ROC_AUC_Improvement'] for r in tuning_results]
+    colors = ['#2ecc71' if imp >= 0 else '#e74c3c' for imp in improvements]
+    bars5 = ax3.bar(model_names, improvements, color=colors, alpha=0.8)
+    ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+    ax3.set_ylabel('ROC-AUC Improvement', fontweight='bold')
+    ax3.set_title('Performance Improvement After Tuning', fontweight='bold')
+    ax3.set_xticklabels(model_names, rotation=45, ha='right')
+    for bar, imp in zip(bars5, improvements):
+        imp_label = f"+{imp:.4f}" if imp >= 0 else f"{imp:.4f}"
+        ax3.text(bar.get_x() + bar.get_width()/2., bar.get_height(), 
+                 imp_label,
+                 ha='center', va='bottom' if imp >= 0 else 'top', fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig("08_hyperparameter_tuning_comparison.png", dpi=300, bbox_inches='tight')
+    print("\n✓ Saved: 08_hyperparameter_tuning_comparison.png")
+    plt.show()
+    
+    # Save results to CSV
+    results_df = pd.DataFrame([{
+        "Model": r["Model"],
+        "Baseline_Accuracy": r["Baseline_Accuracy"],
+        "Tuned_Accuracy": r["Tuned_Accuracy"],
+        "Accuracy_Improvement": r["Accuracy_Improvement"],
+        "Baseline_ROC_AUC": r["Baseline_ROC_AUC"],
+        "Tuned_ROC_AUC": r["Tuned_ROC_AUC"],
+        "ROC_AUC_Improvement": r["ROC_AUC_Improvement"],
+        "Baseline_F1": r["Baseline_F1"],
+        "Tuned_F1": r["Tuned_F1"],
+        "F1_Improvement": r["F1_Improvement"],
+        "CV_Score": r["CV_Score"],
+        "Best_Parameters": r["Best_Parameters"]
+    } for r in tuning_results])
+    
+    results_df.to_csv("hyperparameter_tuning_results.csv", index=False)
+    print("✓ Saved: hyperparameter_tuning_results.csv")
+    
+    return tuning_results, best_models
+
 def run_machine_learning_pipeline():
     print("\n" + "="*60)
     print("MACHINE LEARNING PIPELINE")
@@ -668,11 +1207,21 @@ def run_machine_learning_pipeline():
     print("✓ Saved: 07_roc_auc_curves.png")
     plt.show()
     
+    # =========================================================
+    # PCA DIMENSIONALITY REDUCTION
+    # =========================================================
+    pca_results, X_train_pca, X_test_pca = pca_analysis(X_train, y_train, X_test, y_test, preprocessor)
+    
+    # =========================================================
+    # HYPERPARAMETER TUNING
+    # =========================================================
+    tuning_results, best_models = hyperparameter_tuning(X_train, y_train, X_test, y_test, preprocessor)
+    
     print("\n" + "="*50)
     print("✓ All visualizations have been saved successfully!")
     print("="*50)
     
-    return results, kfold_results
+    return results, kfold_results, tuning_results, best_models, pca_results
 
 def main():
     print("="*60)
@@ -690,5 +1239,5 @@ def main():
     print("PIPELINE EXECUTION COMPLETED SUCCESSFULLY!")
     print("="*60)
 
-main()
-
+if __name__ == "__main__":
+    main()
