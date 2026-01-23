@@ -12,191 +12,23 @@ from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, 
     roc_auc_score, confusion_matrix, roc_curve
 )
-from sklearn.linear_model import Ridge, Lasso, ElasticNet
-from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import validation_curve
+import joblib
+import json
+from typing import List, Dict, Any
 import warnings
 warnings.filterwarnings('ignore')
 
-# FastAPI imports
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-import json
-import pickle
-import os
-from datetime import datetime
+# FastAPI imports for API endpoints
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 import uvicorn
-
- 
-# PYDANTIC MODELS FOR API REQUESTS/RESPONSES
- 
-
-class PatientData(BaseModel):
-    """Schema for single patient prediction request"""
-    patient_id: int
-    age: int = Field(..., ge=18, le=120)
-    gender: str = Field(..., pattern="^(Male|Female)$")
-    blood_group: str = Field(..., pattern="^(A\+|A-|B\+|B-|AB\+|AB-|O\+|O-)$")
-    ethnicity: str = Field(..., pattern="^(Asian|African|Caucasian|Hispanic)$")
-    height_cm: float = Field(..., ge=100, le=250)
-    weight_kg: float = Field(..., ge=30, le=300)
-    smoking_status: str = Field(..., pattern="^(Never|Former|Current)$")
-    alcohol_consumption: str = Field(..., pattern="^(Never|Moderate|High)$")
-    family_history_cancer: int = Field(..., ge=0, le=1)
-    physical_activity_level: str = Field(..., pattern="^(Low|Medium|High)$")
-    diet_quality: str = Field(..., pattern="^(Poor|Average|Good)$")
-    diabetes: int = Field(..., ge=0, le=1)
-    hypertension: int = Field(..., ge=0, le=1)
-    asthma: int = Field(..., ge=0, le=1)
-    cardiac_disease: int = Field(..., ge=0, le=1)
-    prior_radiation_exposure: int = Field(..., ge=0, le=1)
-    unexplained_weight_loss: int = Field(..., ge=0, le=1)
-    persistent_fatigue: int = Field(..., ge=0, le=1)
-    chronic_pain: int = Field(..., ge=0, le=1)
-    abnormal_bleeding: int = Field(..., ge=0, le=1)
-    persistent_cough: int = Field(..., ge=0, le=1)
-    lump_presence: int = Field(..., ge=0, le=1)
-    hemoglobin_level: float = Field(..., ge=5, le=20)
-    wbc_count: int = Field(..., ge=1000, le=50000)
-    platelet_count: int = Field(..., ge=50000, le=1000000)
-    tumor_marker_level: float = Field(..., ge=0, le=200)
-    imaging_abnormality: int = Field(..., ge=0, le=1)
-    tumor_size_cm: float = Field(..., ge=0, le=30)
-
-class BatchPredictionRequest(BaseModel):
-    """Schema for batch prediction request"""
-    patients: List[PatientData]
-    model_name: Optional[str] = "Random Forest"  # Default model
-
-class PredictionResponse(BaseModel):
-    """Schema for prediction response"""
-    patient_id: int
-    prediction: int
-    probability: float
-    risk_level: str
-    confidence: float
-    model_used: str
-    timestamp: str
-    clinical_insights: Dict[str, Any]
-
-class BatchPredictionResponse(BaseModel):
-    """Schema for batch prediction response"""
-    predictions: List[PredictionResponse]
-    total_patients: int
-    positive_cases: int
-    negative_cases: int
-    average_risk: float
-    model_used: str
-    processing_time: float
-
-class ModelInfo(BaseModel):
-    """Schema for model information"""
-    name: str
-    type: str
-    accuracy: float
-    roc_auc: float
-    precision: float
-    recall: float
-    f1_score: float
-    features_used: List[str]
-    training_date: str
-    hyperparameters: Dict[str, Any]
-
-class APIHealthResponse(BaseModel):
-    """Schema for API health check"""
-    status: str
-    version: str
-    uptime: float
-    models_loaded: int
-    total_predictions: int
-    memory_usage: Dict[str, str]
-
- 
-# FASTAPI APP INITIALIZATION
- 
-
-app = FastAPI(
-    title="AI Thunderball Cancer Detection API",
-    description="""A machine learning API for cancer risk prediction using 
-    synthetic patient data with comprehensive feature engineering and multiple 
-    regularization techniques.""",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # In production, specify allowed origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
- 
-# GLOBAL STATE AND INITIALIZATION
- 
-
-class APIManager:
-    """Manages API state and models"""
-    def __init__(self):
-        self.models = {}
-        self.preprocessor = None
-        self.feature_names = []
-        self.total_predictions = 0
-        self.start_time = datetime.now()
-        self.model_metrics = {}
-        
-    def load_models(self, models_dict, preprocessor, feature_names, model_metrics):
-        """Load trained models into API"""
-        self.models = models_dict
-        self.preprocessor = preprocessor
-        self.feature_names = feature_names
-        self.model_metrics = model_metrics
-        print(f"✓ Loaded {len(self.models)} models into API")
-        
-    def get_model(self, model_name="Random Forest"):
-        """Get model by name"""
-        if model_name not in self.models:
-            available = list(self.models.keys())
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Model '{model_name}' not found. Available models: {available}"
-            )
-        return self.models[model_name]
-    
-    def increment_predictions(self):
-        """Track total predictions made"""
-        self.total_predictions += 1
-        
-    def get_uptime(self):
-        """Calculate API uptime in seconds"""
-        return (datetime.now() - self.start_time).total_seconds()
-    
-    def get_memory_usage(self):
-        """Get memory usage information"""
-        try:
-            import psutil
-            process = psutil.Process(os.getpid())
-            mem_info = process.memory_info()
-            return {
-                "rss": f"{mem_info.rss / 1024 / 1024:.2f} MB",
-                "vms": f"{mem_info.vms / 1024 / 1024:.2f} MB"
-            }
-        except:
-            return {"rss": "N/A", "vms": "N/A"}
-
-api_manager = APIManager()
-
- 
-# DATA PROCESSING FUNCTIONS (Same as before)
- 
+from datetime import datetime
 
 def generate_synthetic_data():
     print(" Generating synthetic patient data... \n")
@@ -1000,7 +832,7 @@ def hyperparameter_tuning(X_train, y_train, X_test, y_test, preprocessor):
         print(f"{r['Model']:<25} {r['Baseline_ROC_AUC']:<12.4f} {r['Tuned_ROC_AUC']:<12.4f} {imp_str:<12}")
     
     best_result = max(tuning_results, key=lambda x: x['Tuned_ROC_AUC'])
-    print(f"\n Best Model: {best_result['Model']} with ROC-AUC = {best_result['Tuned_ROC_AUC']:.4f}")
+    print(f"\n🏆 Best Model: {best_result['Model']} with ROC-AUC = {best_result['Tuned_ROC_AUC']:.4f}")
     
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     fig.suptitle("Hyperparameter Tuning Results: Baseline vs Tuned", fontsize=14, fontweight='bold')
@@ -1078,18 +910,30 @@ def hyperparameter_tuning(X_train, y_train, X_test, y_test, preprocessor):
     
     return tuning_results, best_models
 
-def regularization_comparison(X_train, y_train, X_test, y_test, preprocessor):
+def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
+    """
+    Perform regularization analysis to show the effects of L1, L2, and ElasticNet regularization
+    on model performance and overfitting prevention.
+    """
     print("\n" + "="*60)
-    print("REGULARIZATION TECHNIQUES COMPARISON")
+    print("REGULARIZATION ANALYSIS")
     print("="*60)
-    print("\nPurpose: Prevent overfitting and improve generalization")
-    print("Techniques: L1 (Lasso), L2 (Ridge), ElasticNet, Early Stopping, Weight Decay\n")
+    print("\nRegularization prevents overfitting by adding constraints to models.")
+    print("L1 (Lasso): Encourages sparse solutions (feature selection)")
+    print("L2 (Ridge): Shrinks coefficients evenly")
+    print("ElasticNet: Combines L1 and L2")
     
+    # =========================================================
+    # 1. Logistic Regression with different regularization types
+    # =========================================================
+    print("\n[1/4] Logistic Regression with different regularization types...")
+    
+    # Define models with different regularization
     logistic_models = {
-        "No Regularization": LogisticRegression(penalty=None, max_iter=2000, solver='saga'),
-        "L1 Regularization (Lasso)": LogisticRegression(penalty='l1', C=0.1, max_iter=2000, solver='saga'),
-        "L2 Regularization (Ridge)": LogisticRegression(penalty='l2', C=0.1, max_iter=2000),
-        "ElasticNet (L1+L2)": LogisticRegression(penalty='elasticnet', l1_ratio=0.5, C=0.1, max_iter=2000, solver='saga'),
+        "No Regularization": LogisticRegression(penalty=None, max_iter=1000, solver='saga'),
+        "L1 Regularization": LogisticRegression(penalty='l1', C=1.0, max_iter=1000, solver='liblinear'),
+        "L2 Regularization": LogisticRegression(penalty='l2', C=1.0, max_iter=1000, solver='lbfgs'),
+        "ElasticNet": LogisticRegression(penalty='elasticnet', l1_ratio=0.5, C=1.0, max_iter=1000, solver='saga')
     }
     
     logistic_results = []
@@ -1100,354 +944,351 @@ def regularization_comparison(X_train, y_train, X_test, y_test, preprocessor):
             ("model", model)
         ])
         
+        # Fit the model
         pipeline.fit(X_train, y_train)
+        
+        # Get predictions
         y_pred = pipeline.predict(X_test)
         y_prob = pipeline.predict_proba(X_test)[:, 1]
         
+        # Calculate metrics
+        train_score = pipeline.score(X_train, y_train)
+        test_score = pipeline.score(X_test, y_test)
+        
+        # Calculate number of non-zero coefficients (for feature selection analysis)
         if hasattr(pipeline.named_steps['model'], 'coef_'):
-            coef = pipeline.named_steps['model'].coef_[0]
-            n_nonzero = np.sum(coef != 0)
-            total_features = len(coef)
+            coef = pipeline.named_steps['model'].coef_
+            if len(coef.shape) > 1:
+                coef = coef[0]
+            non_zero_coef = np.sum(np.abs(coef) > 1e-5)
         else:
-            n_nonzero = total_features = "N/A"
+            non_zero_coef = None
         
-        results = {
-            "Model": name,
-            "Accuracy": accuracy_score(y_test, y_pred),
-            "Precision": precision_score(y_test, y_pred),
-            "Recall": recall_score(y_test, y_pred),
-            "F1": f1_score(y_test, y_pred),
+        logistic_results.append({
+            "Regularization": name,
+            "Train_Accuracy": train_score,
+            "Test_Accuracy": test_score,
+            "Accuracy_Diff": train_score - test_score,  # Overfitting measure
             "ROC_AUC": roc_auc_score(y_test, y_prob),
-            "Nonzero_Features": n_nonzero,
-            "Total_Features": total_features,
-            "pipeline": pipeline
-        }
+            "Non_Zero_Coefficients": non_zero_coef,
+            "model": pipeline
+        })
         
-        logistic_results.append(results)
-        
-        print(f"  {name:<30} | ROC-AUC: {results['ROC_AUC']:.4f} | "
-              f"Features: {results['Nonzero_Features']}/{results['Total_Features']}")
+        print(f"  {name}:")
+        print(f"    Train Accuracy: {train_score:.4f}")
+        print(f"    Test Accuracy: {test_score:.4f}")
+        print(f"    Overfitting (Train-Test): {(train_score-test_score):.4f}")
+        if non_zero_coef is not None:
+            print(f"    Non-zero coefficients: {non_zero_coef}")
     
-    mlp_models = {
-        "MLP No Regularization": MLPClassifier(hidden_layer_sizes=(100, 50), max_iter=1000, random_state=42),
-        "MLP with L2 Regularization": MLPClassifier(hidden_layer_sizes=(100, 50), alpha=0.01, max_iter=1000, random_state=42),
-        "MLP with Early Stopping": MLPClassifier(hidden_layer_sizes=(100, 50), early_stopping=True, validation_fraction=0.2,
-                                                 max_iter=1000, random_state=42),
-    }
+    # =========================================================
+    # 2. Validation curve for regularization strength (C parameter)
+    # =========================================================
+    print("\n[2/4] Validation curve for regularization strength...")
     
-    mlp_results = []
+    # Create pipeline
+    pipeline = Pipeline(steps=[
+        ("preprocessor", preprocessor),
+        ("model", LogisticRegression(penalty='l2', max_iter=1000, solver='lbfgs'))
+    ])
     
-    for name, model in mlp_models.items():
+    # Define range of C values (inverse of regularization strength)
+    param_range = np.logspace(-3, 3, 10)
+    
+    # Calculate training and validation scores
+    train_scores, test_scores = validation_curve(
+        pipeline, X_train, y_train,
+        param_name="model__C",
+        param_range=param_range,
+        cv=5,
+        scoring="accuracy",
+        n_jobs=-1
+    )
+    
+    # Calculate mean and std
+    train_mean = np.mean(train_scores, axis=1)
+    train_std = np.std(train_scores, axis=1)
+    test_mean = np.mean(test_scores, axis=1)
+    test_std = np.std(test_scores, axis=1)
+    
+    # =========================================================
+    # 3. SVM with different regularization strengths
+    # =========================================================
+    print("\n[3/4] SVM with different regularization strengths...")
+    
+    svm_c_values = [0.001, 0.01, 0.1, 1, 10, 100]
+    svm_results = []
+    
+    for C in svm_c_values:
         pipeline = Pipeline(steps=[
             ("preprocessor", preprocessor),
-            ("model", model)
+            ("model", SVC(kernel='rbf', C=C, probability=True, random_state=42))
         ])
         
         pipeline.fit(X_train, y_train)
-        y_pred = pipeline.predict(X_test)
-        y_prob = pipeline.predict_proba(X_test)[:, 1]
         
-        results = {
-            "Model": name,
-            "Accuracy": accuracy_score(y_test, y_pred),
-            "Precision": precision_score(y_test, y_pred),
-            "Recall": recall_score(y_test, y_pred),
-            "F1": f1_score(y_test, y_pred),
-            "ROC_AUC": roc_auc_score(y_test, y_prob),
-            "pipeline": pipeline
-        }
+        train_score = pipeline.score(X_train, y_train)
+        test_score = pipeline.score(X_test, y_test)
         
-        mlp_results.append(results)
-        print(f"  {name:<35} | ROC-AUC: {results['ROC_AUC']:.4f}")
+        svm_results.append({
+            "C": C,
+            "Train_Accuracy": train_score,
+            "Test_Accuracy": test_score,
+            "Accuracy_Diff": train_score - test_score
+        })
     
-    ensemble_models = {
-        "RF High Complexity": RandomForestClassifier(n_estimators=500, max_depth=None, min_samples_split=2, random_state=42),
-        "RF Regularized": RandomForestClassifier(n_estimators=200, max_depth=10, min_samples_split=10, 
-                                                 min_samples_leaf=4, random_state=42),
-        "GBM High Complexity": GradientBoostingClassifier(n_estimators=500, max_depth=10, learning_rate=0.1, random_state=42),
-        "GBM Regularized": GradientBoostingClassifier(n_estimators=100, max_depth=3, learning_rate=0.05, 
-                                                      min_samples_split=10, subsample=0.8, random_state=42),
-    }
+    print(f"  C values analyzed: {svm_c_values}")
     
-    ensemble_results = []
+    # =========================================================
+    # 4. Neural Network with dropout (simulated via alpha parameter)
+    # =========================================================
+    print("\n[4/4] Neural Network with L2 regularization...")
     
-    for name, model in ensemble_models.items():
+    nn_alphas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
+    nn_results = []
+    
+    for alpha in nn_alphas:
         pipeline = Pipeline(steps=[
             ("preprocessor", preprocessor),
-            ("model", model)
+            ("model", MLPClassifier(
+                hidden_layer_sizes=(50, 25),
+                alpha=alpha,  # L2 regularization parameter
+                max_iter=1000,
+                random_state=42
+            ))
         ])
         
         pipeline.fit(X_train, y_train)
-        y_pred = pipeline.predict(X_test)
-        y_prob = pipeline.predict_proba(X_test)[:, 1]
         
-        results = {
-            "Model": name,
-            "Accuracy": accuracy_score(y_test, y_pred),
-            "Precision": precision_score(y_test, y_pred),
-            "Recall": recall_score(y_test, y_pred),
-            "F1": f1_score(y_test, y_pred),
-            "ROC_AUC": roc_auc_score(y_test, y_prob),
-            "pipeline": pipeline
-        }
+        train_score = pipeline.score(X_train, y_train)
+        test_score = pipeline.score(X_test, y_test)
         
-        ensemble_results.append(results)
-        print(f"  {name:<30} | ROC-AUC: {results['ROC_AUC']:.4f}")
+        nn_results.append({
+            "Alpha": alpha,
+            "Train_Accuracy": train_score,
+            "Test_Accuracy": test_score,
+            "Accuracy_Diff": train_score - test_score
+        })
     
-    C_values = [0.001, 0.01, 0.1, 1, 10, 100, 1000]
-    cv_scores_l1 = []
-    cv_scores_l2 = []
+    print(f"  Alpha values analyzed: {nn_alphas}")
     
-    for C_val in C_values:
-        l1_model = LogisticRegression(penalty='l1', C=C_val, solver='saga', max_iter=2000, random_state=42)
-        l1_pipeline = Pipeline(steps=[("preprocessor", preprocessor), ("model", l1_model)])
-        l1_score = cross_val_score(l1_pipeline, X_train, y_train, cv=5, scoring='roc_auc').mean()
-        cv_scores_l1.append(l1_score)
-        
-        l2_model = LogisticRegression(penalty='l2', C=C_val, max_iter=2000, random_state=42)
-        l2_pipeline = Pipeline(steps=[("preprocessor", preprocessor), ("model", l2_model)])
-        l2_score = cross_val_score(l2_pipeline, X_train, y_train, cv=5, scoring='roc_auc').mean()
-        cv_scores_l2.append(l2_score)
+    # =========================================================
+    # 5. Visualizations
+    # =========================================================
+    print("\n[5/5] Creating regularization visualizations...")
     
-    fig = plt.figure(figsize=(20, 16))
-    fig.suptitle("Regularization Techniques Comparison and Analysis", fontsize=18, fontweight='bold')
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle("Regularization Analysis: Preventing Overfitting", fontsize=16, fontweight='bold')
     
-    ax1 = plt.subplot(3, 3, 1)
-    logistic_names = [r['Model'] for r in logistic_results]
-    logistic_rocs = [r['ROC_AUC'] for r in logistic_results]
+    # Plot 1: Logistic Regression Regularization Types
+    ax1 = axes[0, 0]
+    reg_types = [r["Regularization"] for r in logistic_results]
+    train_acc = [r["Train_Accuracy"] for r in logistic_results]
+    test_acc = [r["Test_Accuracy"] for r in logistic_results]
     
-    colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12']
-    bars = ax1.bar(logistic_names, logistic_rocs, color=colors)
-    ax1.set_title('Logistic Regression: Regularization Impact', fontweight='bold')
-    ax1.set_ylabel('ROC-AUC', fontweight='bold')
+    x = np.arange(len(reg_types))
+    width = 0.35
+    
+    bars1 = ax1.bar(x - width/2, train_acc, width, label='Training Accuracy', alpha=0.8, color='#3498db')
+    bars2 = ax1.bar(x + width/2, test_acc, width, label='Testing Accuracy', alpha=0.8, color='#2ecc71')
+    
+    ax1.set_xlabel('Regularization Type', fontweight='bold')
+    ax1.set_ylabel('Accuracy', fontweight='bold')
+    ax1.set_title('Logistic Regression: Effect of Regularization Type', fontweight='bold')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(reg_types, rotation=45, ha='right')
+    ax1.legend()
     ax1.set_ylim([0.5, 1.0])
-    ax1.tick_params(axis='x', rotation=45)
+    ax1.grid(True, alpha=0.3)
     
-    for bar, roc in zip(bars, logistic_rocs):
-        ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{roc:.4f}',
-                 ha='center', va='bottom', fontsize=9, fontweight='bold')
+    # Add values on bars
+    for bar in bars1 + bars2:
+        height = bar.get_height()
+        ax1.text(bar.get_x() + bar.get_width()/2., height, f'{height:.3f}',
+                 ha='center', va='bottom', fontsize=8)
     
-    ax2 = plt.subplot(3, 3, 2)
+    # Plot 2: Validation Curve for Regularization Strength
+    ax2 = axes[0, 1]
     
-    coef_data = []
-    for i, result in enumerate(logistic_results):
-        if i > 0:
-            pipeline = result['pipeline']
-            model = pipeline.named_steps['model']
-            if hasattr(model, 'coef_'):
-                coef = model.coef_[0]
-                coef_data.append({
-                    'name': result['Model'],
-                    'coef': coef,
-                    'nonzero': np.sum(coef != 0)
-                })
+    ax2.semilogx(param_range, train_mean, label="Training Accuracy", color="darkorange", lw=2)
+    ax2.fill_between(param_range, train_mean - train_std, train_mean + train_std, alpha=0.2, color="darkorange")
     
-    names = [d['name'] for d in coef_data]
-    nonzero_counts = [d['nonzero'] for d in coef_data]
-    total_features = coef_data[0]['coef'].shape[0] if coef_data else 0
+    ax2.semilogx(param_range, test_mean, label="Cross-validation Accuracy", color="navy", lw=2)
+    ax2.fill_between(param_range, test_mean - test_std, test_mean + test_std, alpha=0.2, color="navy")
     
-    bars2 = ax2.bar(names, nonzero_counts, color=['#e74c3c', '#2ecc71', '#f39c12'])
-    ax2.axhline(y=total_features, color='#3498db', linestyle='--', alpha=0.5, label='Total Features')
-    ax2.set_title('Feature Selection: Non-zero Coefficients', fontweight='bold')
-    ax2.set_ylabel('Number of Non-zero Features', fontweight='bold')
-    ax2.tick_params(axis='x', rotation=45)
+    ax2.set_xlabel("Regularization Strength (C)", fontweight='bold')
+    ax2.set_ylabel("Accuracy", fontweight='bold')
+    ax2.set_title("Validation Curve: Effect of Regularization Strength", fontweight='bold')
+    ax2.legend(loc="best")
+    ax2.grid(True, alpha=0.3)
+    
+    # Mark optimal C value
+    optimal_idx = np.argmax(test_mean)
+    optimal_C = param_range[optimal_idx]
+    ax2.axvline(x=optimal_C, color='red', linestyle='--', linewidth=2, label=f'Optimal C = {optimal_C:.3f}')
     ax2.legend()
     
-    for bar, count in zip(bars2, nonzero_counts):
-        ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{count}/{total_features}',
-                 ha='center', va='bottom', fontsize=9)
+    # Plot 3: SVM Regularization Strength
+    ax3 = axes[1, 0]
     
-    ax3 = plt.subplot(3, 3, 3)
-    ax3.plot(C_values, cv_scores_l1, 'o-', linewidth=2, markersize=8, label='L1 Regularization', color='#e74c3c')
-    ax3.plot(C_values, cv_scores_l2, 's-', linewidth=2, markersize=8, label='L2 Regularization', color='#2ecc71')
-    ax3.set_xscale('log')
-    ax3.set_xlabel('Regularization Strength (C)', fontweight='bold')
-    ax3.set_ylabel('CV ROC-AUC Score', fontweight='bold')
-    ax3.set_title('Effect of Regularization Strength', fontweight='bold')
+    svm_c = [r["C"] for r in svm_results]
+    svm_train = [r["Train_Accuracy"] for r in svm_results]
+    svm_test = [r["Test_Accuracy"] for r in svm_results]
+    
+    ax3.semilogx(svm_c, svm_train, 'o-', label='Training Accuracy', linewidth=2, markersize=8, color='#3498db')
+    ax3.semilogx(svm_c, svm_test, 's-', label='Testing Accuracy', linewidth=2, markersize=8, color='#e74c3c')
+    
+    ax3.set_xlabel("Regularization Strength (C)", fontweight='bold')
+    ax3.set_ylabel("Accuracy", fontweight='bold')
+    ax3.set_title("SVM: Effect of Regularization Strength", fontweight='bold')
     ax3.legend()
     ax3.grid(True, alpha=0.3)
     
-    ax4 = plt.subplot(3, 3, 4)
-    mlp_names = [r['Model'] for r in mlp_results]
-    mlp_rocs = [r['ROC_AUC'] for r in mlp_results]
+    # Mark optimal C for SVM
+    optimal_svm_idx = np.argmax(svm_test)
+    optimal_svm_C = svm_c[optimal_svm_idx]
+    ax3.axvline(x=optimal_svm_C, color='green', linestyle='--', linewidth=2, label=f'Optimal C = {optimal_svm_C}')
+    ax3.legend()
     
-    colors_mlp = ['#3498db', '#9b59b6', '#1abc9c']
-    bars4 = ax4.bar(mlp_names, mlp_rocs, color=colors_mlp)
-    ax4.set_title('Neural Network: Regularization Impact', fontweight='bold')
-    ax4.set_ylabel('ROC-AUC', fontweight='bold')
-    ax4.set_ylim([0.5, 1.0])
-    ax4.tick_params(axis='x', rotation=45)
+    # Plot 4: Neural Network Regularization
+    ax4 = axes[1, 1]
     
-    for bar, roc in zip(bars4, mlp_rocs):
-        ax4.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{roc:.4f}',
-                 ha='center', va='bottom', fontsize=9, fontweight='bold')
+    nn_alpha = [r["Alpha"] for r in nn_results]
+    nn_train = [r["Train_Accuracy"] for r in nn_results]
+    nn_test = [r["Test_Accuracy"] for r in nn_results]
     
-    ax5 = plt.subplot(3, 3, 5)
-    ensemble_names = [r['Model'] for r in ensemble_results]
-    ensemble_rocs = [r['ROC_AUC'] for r in ensemble_results]
+    ax4.semilogx(nn_alpha, nn_train, 'o-', label='Training Accuracy', linewidth=2, markersize=8, color='#3498db')
+    ax4.semilogx(nn_alpha, nn_test, 's-', label='Testing Accuracy', linewidth=2, markersize=8, color='#e74c3c')
     
-    colors_ensemble = ['#3498db', '#2ecc71', '#e74c3c', '#f39c12']
-    bars5 = ax5.bar(ensemble_names, ensemble_rocs, color=colors_ensemble)
-    ax5.set_title('Ensemble Methods: Complexity vs Regularization', fontweight='bold')
-    ax5.set_ylabel('ROC-AUC', fontweight='bold')
-    ax5.set_ylim([0.5, 1.0])
-    ax5.tick_params(axis='x', rotation=45)
+    ax4.set_xlabel("Regularization Strength (Alpha)", fontweight='bold')
+    ax4.set_ylabel("Accuracy", fontweight='bold')
+    ax4.set_title("Neural Network: Effect of L2 Regularization", fontweight='bold')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
     
-    for bar, roc in zip(bars5, ensemble_rocs):
-        ax5.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{roc:.4f}',
-                 ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
-    ax6 = plt.subplot(3, 3, 6)
-    
-    for i, result in enumerate(logistic_results):
-        if i > 0:
-            pipeline = result['pipeline']
-            model = pipeline.named_steps['model']
-            if hasattr(model, 'coef_'):
-                coef = model.coef_[0]
-                ax6.hist(coef[coef != 0], bins=30, alpha=0.5, label=result['Model'])
-    
-    ax6.set_title('Coefficient Distribution', fontweight='bold')
-    ax6.set_xlabel('Coefficient Value', fontweight='bold')
-    ax6.set_ylabel('Frequency', fontweight='bold')
-    ax6.legend()
-    ax6.grid(True, alpha=0.3)
-    
-    ax7 = plt.subplot(3, 3, 7)
-    
-    all_results = logistic_results + mlp_results + ensemble_results
-    complexity_scores = []
-    accuracy_scores = []
-    
-    for result in all_results:
-        accuracy_scores.append(result['Accuracy'])
-        
-        if 'Regularized' in result['Model'] or 'L1' in result['Model'] or 'L2' in result['Model']:
-            complexity = 0.3
-        elif 'High Complexity' in result['Model'] or 'No Regularization' in result['Model']:
-            complexity = 0.9
-        else:
-            complexity = 0.5
-        
-        complexity_scores.append(complexity)
-    
-    scatter = ax7.scatter(complexity_scores, accuracy_scores, s=100, alpha=0.7, 
-                         c=np.arange(len(all_results)), cmap='viridis')
-    ax7.set_xlabel('Model Complexity (Estimated)', fontweight='bold')
-    ax7.set_ylabel('Accuracy', fontweight='bold')
-    ax7.set_title('Accuracy vs Model Complexity Trade-off', fontweight='bold')
-    ax7.grid(True, alpha=0.3)
-    
-    ax8 = plt.subplot(3, 3, 8)
-    
-    complexities = [0.1, 0.3, 0.5, 0.7, 0.9]
-    train_scores = [0.95, 0.92, 0.89, 0.85, 0.80]
-    test_scores = [0.70, 0.82, 0.85, 0.83, 0.78]
-    
-    ax8.plot(complexities, train_scores, 'o-', linewidth=2, markersize=8, 
-             label='Training Score', color='#3498db')
-    ax8.plot(complexities, test_scores, 's-', linewidth=2, markersize=8, 
-             label='Test Score', color='#e74c3c')
-    ax8.fill_between(complexities, train_scores, test_scores, alpha=0.2, color='gray', 
-                     label='Overfitting Gap')
-    ax8.set_xlabel('Model Complexity', fontweight='bold')
-    ax8.set_ylabel('Score', fontweight='bold')
-    ax8.set_title('Overfitting: Train vs Test Performance', fontweight='bold')
-    ax8.legend()
-    ax8.grid(True, alpha=0.3)
-    
-    ax9 = plt.subplot(3, 3, 9)
-    
-    best_logistic = max(logistic_results, key=lambda x: x['ROC_AUC'])
-    best_mlp = max(mlp_results, key=lambda x: x['ROC_AUC'])
-    best_ensemble = max(ensemble_results, key=lambda x: x['ROC_AUC'])
-    
-    best_models = [best_logistic, best_mlp, best_ensemble]
-    best_names = [b['Model'] for b in best_models]
-    best_rocs = [b['ROC_AUC'] for b in best_models]
-    
-    colors_best = ['#2ecc71', '#9b59b6', '#e74c3c']
-    bars9 = ax9.bar(best_names, best_rocs, color=colors_best)
-    ax9.set_title('Best Regularized Models by Category', fontweight='bold')
-    ax9.set_ylabel('ROC-AUC', fontweight='bold')
-    ax9.set_ylim([0.5, 1.0])
-    ax9.tick_params(axis='x', rotation=45)
-    
-    for bar, roc in zip(bars9, best_rocs):
-        ax9.text(bar.get_x() + bar.get_width()/2., bar.get_height(), f'{roc:.4f}',
-                 ha='center', va='bottom', fontsize=10, fontweight='bold')
+    # Mark optimal alpha for NN
+    optimal_nn_idx = np.argmax(nn_test)
+    optimal_nn_alpha = nn_alpha[optimal_nn_idx]
+    ax4.axvline(x=optimal_nn_alpha, color='green', linestyle='--', linewidth=2, label=f'Optimal α = {optimal_nn_alpha}')
+    ax4.legend()
     
     plt.tight_layout()
     plt.savefig("11_regularization_analysis.png", dpi=300, bbox_inches='tight')
     print("✓ Saved: 11_regularization_analysis.png")
     plt.show()
     
-    print("\n[6/6] Regularization Analysis Summary Report")
-    print("─" * 50)
+    # =========================================================
+    # 6. Coefficient analysis for L1 vs L2 regularization
+    # =========================================================
+    print("\n[6/6] Coefficient analysis for L1 vs L2 regularization...")
     
+    # Get feature names
+    feature_names = get_feature_names(preprocessor)
+    
+    # Train L1 and L2 models
+    pipeline_l1 = Pipeline(steps=[
+        ("preprocessor", preprocessor),
+        ("model", LogisticRegression(penalty='l1', C=1.0, max_iter=1000, solver='liblinear'))
+    ])
+    
+    pipeline_l2 = Pipeline(steps=[
+        ("preprocessor", preprocessor),
+        ("model", LogisticRegression(penalty='l2', C=1.0, max_iter=1000, solver='lbfgs'))
+    ])
+    
+    pipeline_l1.fit(X_train, y_train)
+    pipeline_l2.fit(X_train, y_train)
+    
+    # Get coefficients
+    coef_l1 = pipeline_l1.named_steps['model'].coef_[0]
+    coef_l2 = pipeline_l2.named_steps['model'].coef_[0]
+    
+    # Get top features for each
+    top_n = 15
+    l1_indices = np.argsort(np.abs(coef_l1))[-top_n:][::-1]
+    l2_indices = np.argsort(np.abs(coef_l2))[-top_n:][::-1]
+    
+    # Create coefficient comparison visualization
+    fig, axes = plt.subplots(1, 2, figsize=(16, 8))
+    fig.suptitle("Feature Coefficients: L1 vs L2 Regularization", fontsize=16, fontweight='bold')
+    
+    # L1 coefficients
+    ax1 = axes[0]
+    l1_features = [feature_names[i] for i in l1_indices]
+    l1_values = coef_l1[l1_indices]
+    colors1 = ['#e74c3c' if val < 0 else '#2ecc71' for val in l1_values]
+    bars1 = ax1.barh(range(len(l1_features)), l1_values, color=colors1, alpha=0.8)
+    ax1.set_yticks(range(len(l1_features)))
+    ax1.set_yticklabels(l1_features)
+    ax1.set_xlabel('Coefficient Value', fontweight='bold')
+    ax1.set_title('L1 Regularization (Sparse Solution)', fontweight='bold')
+    ax1.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+    ax1.invert_yaxis()
+    
+    # Add values on bars
+    for i, (bar, val) in enumerate(zip(bars1, l1_values)):
+        ax1.text(val, i, f' {val:.3f}', va='center', fontsize=9,
+                 color='black', fontweight='bold')
+    
+    # L2 coefficients
+    ax2 = axes[1]
+    l2_features = [feature_names[i] for i in l2_indices]
+    l2_values = coef_l2[l2_indices]
+    colors2 = ['#e74c3c' if val < 0 else '#2ecc71' for val in l2_values]
+    bars2 = ax2.barh(range(len(l2_features)), l2_values, color=colors2, alpha=0.8)
+    ax2.set_yticks(range(len(l2_features)))
+    ax2.set_yticklabels(l2_features)
+    ax2.set_xlabel('Coefficient Value', fontweight='bold')
+    ax2.set_title('L2 Regularization (Dense Solution)', fontweight='bold')
+    ax2.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+    ax2.invert_yaxis()
+    
+    # Add values on bars
+    for i, (bar, val) in enumerate(zip(bars2, l2_values)):
+        ax2.text(val, i, f' {val:.3f}', va='center', fontsize=9,
+                 color='black', fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig("12_regularization_coefficients.png", dpi=300, bbox_inches='tight')
+    print("✓ Saved: 12_regularization_coefficients.png")
+    plt.show()
+    
+    # Summary statistics
     print("\n" + "="*60)
     print("REGULARIZATION ANALYSIS SUMMARY")
     print("="*60)
     
-    all_models_results = logistic_results + mlp_results + ensemble_results
-    best_overall = max(all_models_results, key=lambda x: x['ROC_AUC'])
-    
-    print(f"\n🏆 BEST OVERALL REGULARIZED MODEL:")
-    print(f"   Model: {best_overall['Model']}")
-    print(f"   ROC-AUC: {best_overall['ROC_AUC']:.4f}")
-    print(f"   Accuracy: {best_overall['Accuracy']:.4f}")
-    print(f"   F1-Score: {best_overall['F1']:.4f}")
-    
-    print(f"\n LOGISTIC REGRESSION ANALYSIS:")
-    print(f"   {'Model':<35} {'ROC-AUC':<10} {'Non-zero Features':<20}")
-    print("   " + "-" * 65)
+    print(f"\nLogistic Regression Results:")
+    print(f"{'Regularization':<20} {'Train Acc':<12} {'Test Acc':<12} {'Overfitting':<12} {'Non-Zero Coef':<15}")
+    print("-" * 75)
     for r in logistic_results:
-        features_str = f"{r['Nonzero_Features']}/{r['Total_Features']}" if r['Total_Features'] != "N/A" else "N/A"
-        print(f"   {r['Model']:<35} {r['ROC_AUC']:<10.4f} {features_str:<20}")
+        print(f"{r['Regularization']:<20} {r['Train_Accuracy']:<12.4f} {r['Test_Accuracy']:<12.4f} {r['Accuracy_Diff']:<12.4f} {str(r['Non_Zero_Coefficients']):<15}")
     
-    print(f"\n NEURAL NETWORK ANALYSIS:")
-    print(f"   {'Model':<35} {'ROC-AUC':<10} {'Accuracy':<10}")
-    print("   " + "-" * 55)
-    for r in mlp_results:
-        print(f"   {r['Model']:<35} {r['ROC_AUC']:<10.4f} {r['Accuracy']:<10.4f}")
+    print(f"\nOptimal Parameters:")
+    print(f"  Logistic Regression C: {optimal_C:.3f}")
+    print(f"  SVM C: {optimal_svm_C}")
+    print(f"  Neural Network Alpha: {optimal_nn_alpha}")
     
-    print(f"\n ENSEMBLE METHODS ANALYSIS:")
-    print(f"   {'Model':<35} {'ROC-AUC':<10} {'Accuracy':<10}")
-    print("   " + "-" * 55)
-    for r in ensemble_results:
-        print(f"   {r['Model']:<35} {r['ROC_AUC']:<10.4f} {r['Accuracy']:<10.4f}")
+    print(f"\nFeature Selection (L1 vs L2):")
+    print(f"  L1 regularization kept {np.sum(np.abs(coef_l1) > 1e-5)} non-zero coefficients")
+    print(f"  L2 regularization kept {len(coef_l2)} non-zero coefficients")
+    print(f"  L1 sparsity: {(1 - np.sum(np.abs(coef_l1) > 1e-5) / len(coef_l1)) * 100:.1f}%")
     
-    print(f"\n REGULARIZATION RECOMMENDATIONS:")
-    print(f"   1. For feature selection → L1 Regularization (Lasso)")
-    print(f"   2. For preventing large coefficients → L2 Regularization (Ridge)")
-    print(f"   3. For balanced approach → ElasticNet (L1 + L2)")
-    print(f"   4. For neural networks → Dropout + L2 + Early Stopping")
-    print(f"   5. For ensemble methods → Limit tree depth, increase min_samples")
-    
-    summary_data = []
-    for result in all_models_results:
-        summary_data.append({
-            "Model_Type": result['Model'],
-            "ROC_AUC": result['ROC_AUC'],
-            "Accuracy": result['Accuracy'],
-            "Precision": result['Precision'],
-            "Recall": result['Recall'],
-            "F1_Score": result['F1']
-        })
-    
-    summary_df = pd.DataFrame(summary_data)
-    summary_df = summary_df.sort_values("ROC_AUC", ascending=False)
-    summary_df.to_csv("regularization_results_summary.csv", index=False)
-    print(f"\n✓ Saved detailed results to: regularization_results_summary.csv")
+    # Save results to CSV
+    reg_results_df = pd.DataFrame(logistic_results)
+    reg_results_df.to_csv("regularization_results.csv", index=False)
+    print("\n✓ Saved: regularization_results.csv")
     
     regularization_results = {
         "logistic_results": logistic_results,
-        "mlp_results": mlp_results,
-        "ensemble_results": ensemble_results,
-        "best_overall": best_overall,
-        "cv_scores_l1": cv_scores_l1,
-        "cv_scores_l2": cv_scores_l2,
-        "C_values": C_values
+        "svm_results": svm_results,
+        "nn_results": nn_results,
+        "optimal_C": optimal_C,
+        "optimal_svm_C": optimal_svm_C,
+        "optimal_nn_alpha": optimal_nn_alpha,
+        "coef_l1": coef_l1,
+        "coef_l2": coef_l2,
+        "feature_names": feature_names
     }
     
     return regularization_results
@@ -1697,67 +1538,201 @@ def run_machine_learning_pipeline():
     print("✓ Saved: 07_roc_auc_curves.png")
     plt.show()
     
-    tuning_results, best_models = hyperparameter_tuning(X_train, y_train, X_test, y_test, preprocessor)
-    
+    # =========================================================
+    # PCA DIMENSIONALITY REDUCTION
+    # =========================================================
     pca_results, X_train_pca, X_test_pca = pca_analysis(X_train, y_train, X_test, y_test, preprocessor)
     
-    regularization_results = regularization_comparison(X_train, y_train, X_test, y_test, preprocessor)
+    # =========================================================
+    # HYPERPARAMETER TUNING
+    # =========================================================
+    tuning_results, best_models = hyperparameter_tuning(X_train, y_train, X_test, y_test, preprocessor)
     
-     
-    # PREPARE MODELS FOR API
-     
+    # =========================================================
+    # REGULARIZATION ANALYSIS
+    # =========================================================
+    regularization_results = regularization_analysis(X_train, y_train, X_test, y_test, preprocessor)
     
+    # =========================================================
+    # SAVE MODELS FOR API USE
+    # =========================================================
     print("\n" + "="*60)
-    print("PREPARING MODELS FOR API DEPLOYMENT")
+    print("SAVING MODELS FOR API DEPLOYMENT")
     print("="*60)
     
-    # Prepare model metrics for API
-    model_metrics = {}
-    for r in results:
-        model_metrics[r['Model']] = {
-            "accuracy": r['Accuracy'],
-            "roc_auc": r['ROC AUC'],
-            "precision": r['Precision'],
-            "recall": r['Recall'],
-            "f1_score": r['F1 Score']
-        }
+    # Save the preprocessor
+    joblib.dump(preprocessor, 'api_preprocessor.pkl')
+    print("✓ Saved: api_preprocessor.pkl")
     
-    # Add tuned models
+    # Save all trained models
     for name, model in best_models.items():
-        if name not in model_metrics:
-            pipeline = Pipeline(steps=[
-                ("preprocessor", preprocessor),
-                ("model", model)
-            ])
-            pipeline.fit(X_train, y_train)
-            y_pred = pipeline.predict(X_test)
-            y_prob = pipeline.predict_proba(X_test)[:, 1]
-            
-            model_metrics[name + " (Tuned)"] = {
-                "accuracy": accuracy_score(y_test, y_pred),
-                "roc_auc": roc_auc_score(y_test, y_prob),
-                "precision": precision_score(y_test, y_pred),
-                "recall": recall_score(y_test, y_pred),
-                "f1_score": f1_score(y_test, y_pred)
-            }
-            best_models[name + " (Tuned)"] = pipeline
+        joblib.dump(model, f'api_model_{name.replace(" ", "_").lower()}.pkl')
+        print(f"✓ Saved: api_model_{name.replace(' ', '_').lower()}.pkl")
     
-    # Load models into API manager
-    api_manager.load_models(best_models, preprocessor, feature_names, model_metrics)
+    # Save the best model (Random Forest usually performs best)
+    best_model_name = max(tuning_results, key=lambda x: x['Tuned_ROC_AUC'])['Model']
+    best_model = best_models[best_model_name]
+    joblib.dump(best_model, 'api_best_model.pkl')
+    print(f"✓ Saved best model ({best_model_name}): api_best_model.pkl")
     
-    print(f"\n✓ API ready with {len(best_models)} models")
-    print("✓ Preprocessor and feature names loaded")
-    print("✓ Model metrics prepared")
+    # Save feature names for API reference
+    with open('api_feature_names.json', 'w') as f:
+        json.dump(feature_names, f)
+    print("✓ Saved: api_feature_names.json")
+    
+    # Save model metadata
+    model_metadata = {
+        "models_available": list(best_models.keys()),
+        "best_model": best_model_name,
+        "feature_names": feature_names,
+        "categorical_columns": list(categorical_cols),
+        "numerical_columns": list(numerical_cols),
+        "training_date": datetime.now().isoformat(),
+        "performance": {r['Model']: {
+            "accuracy": r['Tuned_Accuracy'],
+            "roc_auc": r['Tuned_ROC_AUC'],
+            "f1_score": r['Tuned_F1']
+        } for r in tuning_results}
+    }
+    
+    with open('api_model_metadata.json', 'w') as f:
+        json.dump(model_metadata, f, indent=2)
+    print("✓ Saved: api_model_metadata.json")
     
     print("\n" + "="*50)
     print("✓ All visualizations have been saved successfully!")
+    print("✓ All models have been saved for API deployment!")
     print("="*50)
     
     return results, kfold_results, tuning_results, best_models, pca_results, regularization_results
 
- 
-# FASTAPI ENDPOINTS
- 
+# =========================================================
+# FASTAPI ENDPOINTS IMPLEMENTATION
+# =========================================================
+
+# Pydantic models for request/response validation
+class PatientData(BaseModel):
+    age: int
+    gender: str
+    blood_group: str
+    ethnicity: str
+    height_cm: int
+    weight_kg: float
+    smoking_status: str
+    alcohol_consumption: str
+    family_history_cancer: int
+    physical_activity_level: str
+    diet_quality: str
+    diabetes: int
+    hypertension: int
+    asthma: int
+    cardiac_disease: int
+    prior_radiation_exposure: int
+    unexplained_weight_loss: int
+    persistent_fatigue: int
+    chronic_pain: int
+    abnormal_bleeding: int
+    persistent_cough: int
+    lump_presence: int
+    hemoglobin_level: float
+    wbc_count: int
+    platelet_count: int
+    tumor_marker_level: float
+    imaging_abnormality: int
+    tumor_size_cm: float
+
+class BatchPatientData(BaseModel):
+    patients: List[PatientData]
+
+class PredictionResponse(BaseModel):
+    prediction: int
+    probability: float
+    cancer_risk: str
+    model_used: str
+    timestamp: str
+
+class BatchPredictionResponse(BaseModel):
+    predictions: List[dict]
+    model_used: str
+    timestamp: str
+    total_patients: int
+    positive_cases: int
+    positive_percentage: float
+
+class ModelInfo(BaseModel):
+    name: str
+    type: str
+    accuracy: float
+    roc_auc: float
+    f1_score: float
+    parameters: dict
+
+class HealthCheck(BaseModel):
+    status: str
+    timestamp: str
+    models_loaded: List[str]
+    api_version: str
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="AI Thunderball Cancer Detection API",
+    description="API for cancer risk prediction using machine learning models",
+    version="1.0.0"
+)
+
+# Global variables for loaded models
+models = {}
+preprocessor = None
+feature_names = []
+model_metadata = {}
+
+@app.on_event("startup")
+async def startup_event():
+    """Load models and preprocessor on startup"""
+    global models, preprocessor, feature_names, model_metadata
+    
+    print("\n" + "="*60)
+    print("LOADING MODELS FOR API")
+    print("="*60)
+    
+    try:
+        # Load preprocessor
+        preprocessor = joblib.load('api_preprocessor.pkl')
+        print("✓ Preprocessor loaded")
+        
+        # Load available models
+        model_files = {
+            "logistic_regression": "api_model_logistic_regression.pkl",
+            "random_forest": "api_model_random_forest.pkl",
+            "svm": "api_model_svm.pkl",
+            "gradient_boosting": "api_model_gradient_boosting.pkl",
+            "best_model": "api_best_model.pkl"
+        }
+        
+        for model_name, file_path in model_files.items():
+            try:
+                models[model_name] = joblib.load(file_path)
+                print(f"✓ {model_name} loaded")
+            except FileNotFoundError:
+                print(f"⚠ {model_name} not found, skipping...")
+        
+        # Load feature names
+        with open('api_feature_names.json', 'r') as f:
+            feature_names = json.load(f)
+        print(f"✓ Feature names loaded ({len(feature_names)} features)")
+        
+        # Load model metadata
+        with open('api_model_metadata.json', 'r') as f:
+            model_metadata = json.load(f)
+        print("✓ Model metadata loaded")
+        
+        print("="*60)
+        print("API READY FOR REQUESTS")
+        print("="*60)
+        
+    except Exception as e:
+        print(f"❌ Error loading models: {e}")
+        raise e
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -1765,41 +1740,166 @@ async def root():
     return {
         "message": "Welcome to AI Thunderball Cancer Detection API",
         "version": "1.0.0",
-        "description": "Machine learning API for cancer risk prediction",
         "endpoints": {
-            "/docs": "Interactive API documentation",
-            "/predict": "Single patient prediction",
-            "/predict-batch": "Batch predictions",
-            "/models": "List available models",
-            "/health": "API health check",
-            "/features": "List feature names"
-        }
+            "predict": "/predict (POST) - Single patient prediction",
+            "predict_batch": "/predict/batch (POST) - Batch predictions",
+            "models": "/models (GET) - List available models",
+            "health": "/health (GET) - API health check"
+        },
+        "documentation": "/docs"
     }
 
 @app.post("/predict", response_model=PredictionResponse, tags=["Predictions"])
-async def predict_patient(patient: PatientData, model_name: str = "Random Forest"):
+async def predict(
+    patient: PatientData,
+    model_name: str = "best_model"
+):
     """
     Make a cancer risk prediction for a single patient
     
-    - **patient**: Patient data including demographics, symptoms, and test results
-    - **model_name**: Name of the model to use for prediction (default: "Random Forest")
+    - **patient**: Patient data including demographics, lifestyle, and clinical features
+    - **model_name**: Model to use for prediction (default: best_model)
     """
+    
+    # Check if model exists
+    if model_name not in models:
+        available_models = list(models.keys())
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model '{model_name}' not found. Available models: {available_models}"
+        )
+    
     try:
-        start_time = datetime.now()
-        
-        # Get the requested model
-        pipeline = api_manager.get_model(model_name)
-        
         # Convert patient data to DataFrame
         patient_dict = patient.dict()
-        patient_id = patient_dict.pop("patient_id")
-        df = pd.DataFrame([patient_dict])
+        patient_df = pd.DataFrame([patient_dict])
+        
+        # Apply feature engineering (same as in training)
+        patient_df['bmi'] = patient_df['weight_kg'] / ((patient_df['height_cm'] / 100) ** 2)
+        
+        # Age category
+        def get_age_category(age):
+            if age <= 30:
+                return 'Young'
+            elif age <= 50:
+                return 'Middle-aged'
+            elif age <= 70:
+                return 'Senior'
+            else:
+                return 'Elderly'
+        
+        patient_df['age_category'] = patient_df['age'].apply(get_age_category)
+        
+        # Platelet lymphocyte ratio
+        patient_df['platelet_lymphocyte_ratio'] = patient_df['platelet_count'] / (patient_df['wbc_count'] * 0.3 + 1e-10)
+        
+        # Lifestyle risk score
+        def get_smoking_score(status):
+            smoking_map = {'Never': 0, 'Former': 1, 'Current': 2}
+            return smoking_map.get(status, 0)
+
+        def get_alcohol_score(consumption):
+            alcohol_map = {'Never': 0, 'Moderate': 1, 'High': 2}
+            return alcohol_map.get(consumption, 0)
+
+        def get_activity_score(activity):
+            activity_map = {'High': 0, 'Medium': 1, 'Low': 2}
+            return activity_map.get(activity, 0)
+
+        def get_diet_score(diet):
+            diet_map = {'Good': 0, 'Average': 1, 'Poor': 2}
+            return diet_map.get(diet, 0)
+        
+        patient_df['lifestyle_risk_score'] = (
+            patient_df['smoking_status'].apply(get_smoking_score) +
+            patient_df['alcohol_consumption'].apply(get_alcohol_score) +
+            patient_df['physical_activity_level'].apply(get_activity_score) +
+            patient_df['diet_quality'].apply(get_diet_score)
+        )
+        
+        # Clinical risk score
+        def calculate_clinical_risk(row):
+            score = 0
+            
+            if row['age'] > 50:
+                score += 3
+            elif row['age'] > 40:
+                score += 2
+            elif row['age'] > 30:
+                score += 1
+            
+            if row['family_history_cancer'] == 1:
+                score += 4
+            
+            symptom_score = 0
+            if row['unexplained_weight_loss'] == 1:
+                symptom_score += 3
+            if row['lump_presence'] == 1:
+                symptom_score += 4
+            if row['persistent_fatigue'] == 1:
+                symptom_score += 2
+            if row['chronic_pain'] == 1:
+                symptom_score += 2
+            if row['abnormal_bleeding'] == 1:
+                symptom_score += 3
+            if row['persistent_cough'] == 1:
+                symptom_score += 2
+            
+            score += symptom_score
+            
+            comorbidity_score = (row['diabetes'] * 1 + row['hypertension'] * 1 + row['cardiac_disease'] * 2)
+            score += comorbidity_score
+            
+            if row['lifestyle_risk_score'] > 6:
+                score += 3
+            elif row['lifestyle_risk_score'] > 4:
+                score += 2
+            elif row['lifestyle_risk_score'] > 2:
+                score += 1
+            
+            if row['tumor_marker_level'] > 50:
+                score += 3
+            elif row['tumor_marker_level'] > 25:
+                score += 2
+            elif row['tumor_marker_level'] > 10:
+                score += 1
+            
+            if row['tumor_size_cm'] > 5:
+                score += 4
+            elif row['tumor_size_cm'] > 2:
+                score += 2
+            elif row['tumor_size_cm'] > 0.5:
+                score += 1
+            
+            if row['imaging_abnormality'] == 1:
+                score += 3
+            
+            if row['hemoglobin_level'] < 12 and row['gender'] == 'Female':
+                score += 2
+            elif row['hemoglobin_level'] < 13.5 and row['gender'] == 'Male':
+                score += 2
+            
+            if row['platelet_count'] > 400000 or row['platelet_count'] < 150000:
+                score += 1
+            
+            return score
+        
+        patient_df['clinical_risk_score'] = patient_df.apply(calculate_clinical_risk, axis=1)
         
         # Make prediction
-        probability = pipeline.predict_proba(df)[0, 1]
-        prediction = 1 if probability >= 0.5 else 0
+        model = models[model_name]
         
-        # Calculate risk level
+        # If model is a pipeline, use it directly
+        if hasattr(model, 'predict_proba'):
+            prediction = model.predict(patient_df)[0]
+            probability = model.predict_proba(patient_df)[0, 1]
+        else:
+            # Preprocess data first
+            processed_data = preprocessor.transform(patient_df)
+            prediction = model.predict(processed_data)[0]
+            probability = model.predict_proba(processed_data)[0, 1]
+        
+        # Determine risk level
         if probability < 0.3:
             risk_level = "Low"
         elif probability < 0.7:
@@ -1807,290 +1907,270 @@ async def predict_patient(patient: PatientData, model_name: str = "Random Forest
         else:
             risk_level = "High"
         
-        # Calculate confidence (distance from decision boundary)
-        confidence = abs(probability - 0.5) * 2
-        
-        # Generate clinical insights
-        clinical_insights = generate_clinical_insights(patient_dict, probability)
-        
-        # Increment prediction counter
-        api_manager.increment_predictions()
-        
-        processing_time = (datetime.now() - start_time).total_seconds()
-        
         return PredictionResponse(
-            patient_id=patient_id,
-            prediction=prediction,
-            probability=probability,
-            risk_level=risk_level,
-            confidence=confidence,
+            prediction=int(prediction),
+            probability=float(probability),
+            cancer_risk=risk_level,
             model_used=model_name,
-            timestamp=datetime.now().isoformat(),
-            clinical_insights=clinical_insights
+            timestamp=datetime.now().isoformat()
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
-@app.post("/predict-batch", response_model=BatchPredictionResponse, tags=["Predictions"])
-async def predict_batch(request: BatchPredictionRequest):
+@app.post("/predict/batch", response_model=BatchPredictionResponse, tags=["Predictions"])
+async def predict_batch(
+    batch_data: BatchPatientData,
+    model_name: str = "best_model"
+):
     """
     Make cancer risk predictions for multiple patients
     
-    - **patients**: List of patient data
-    - **model_name**: Name of the model to use for prediction
+    - **batch_data**: List of patient data
+    - **model_name**: Model to use for prediction (default: best_model)
     """
+    
+    # Check if model exists
+    if model_name not in models:
+        available_models = list(models.keys())
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model '{model_name}' not found. Available models: {available_models}"
+        )
+    
     try:
-        start_time = datetime.now()
+        patients = [patient.dict() for patient in batch_data.patients]
+        patient_df = pd.DataFrame(patients)
         
-        # Get the requested model
-        pipeline = api_manager.get_model(request.model_name)
+        # Apply feature engineering to all patients
+        patient_df['bmi'] = patient_df['weight_kg'] / ((patient_df['height_cm'] / 100) ** 2)
         
-        predictions = []
+        # Age category
+        def get_age_category(age):
+            if age <= 30:
+                return 'Young'
+            elif age <= 50:
+                return 'Middle-aged'
+            elif age <= 70:
+                return 'Senior'
+            else:
+                return 'Elderly'
+        
+        patient_df['age_category'] = patient_df['age'].apply(get_age_category)
+        
+        # Platelet lymphocyte ratio
+        patient_df['platelet_lymphocyte_ratio'] = patient_df['platelet_count'] / (patient_df['wbc_count'] * 0.3 + 1e-10)
+        
+        # Lifestyle risk score
+        def get_smoking_score(status):
+            smoking_map = {'Never': 0, 'Former': 1, 'Current': 2}
+            return smoking_map.get(status, 0)
+
+        def get_alcohol_score(consumption):
+            alcohol_map = {'Never': 0, 'Moderate': 1, 'High': 2}
+            return alcohol_map.get(consumption, 0)
+
+        def get_activity_score(activity):
+            activity_map = {'High': 0, 'Medium': 1, 'Low': 2}
+            return activity_map.get(activity, 0)
+
+        def get_diet_score(diet):
+            diet_map = {'Good': 0, 'Average': 1, 'Poor': 2}
+            return diet_map.get(diet, 0)
+        
+        patient_df['lifestyle_risk_score'] = (
+            patient_df['smoking_status'].apply(get_smoking_score) +
+            patient_df['alcohol_consumption'].apply(get_alcohol_score) +
+            patient_df['physical_activity_level'].apply(get_activity_score) +
+            patient_df['diet_quality'].apply(get_diet_score)
+        )
+        
+        # Clinical risk score
+        def calculate_clinical_risk(row):
+            score = 0
+            
+            if row['age'] > 50:
+                score += 3
+            elif row['age'] > 40:
+                score += 2
+            elif row['age'] > 30:
+                score += 1
+            
+            if row['family_history_cancer'] == 1:
+                score += 4
+            
+            symptom_score = 0
+            if row['unexplained_weight_loss'] == 1:
+                symptom_score += 3
+            if row['lump_presence'] == 1:
+                symptom_score += 4
+            if row['persistent_fatigue'] == 1:
+                symptom_score += 2
+            if row['chronic_pain'] == 1:
+                symptom_score += 2
+            if row['abnormal_bleeding'] == 1:
+                symptom_score += 3
+            if row['persistent_cough'] == 1:
+                symptom_score += 2
+            
+            score += symptom_score
+            
+            comorbidity_score = (row['diabetes'] * 1 + row['hypertension'] * 1 + row['cardiac_disease'] * 2)
+            score += comorbidity_score
+            
+            if row['lifestyle_risk_score'] > 6:
+                score += 3
+            elif row['lifestyle_risk_score'] > 4:
+                score += 2
+            elif row['lifestyle_risk_score'] > 2:
+                score += 1
+            
+            if row['tumor_marker_level'] > 50:
+                score += 3
+            elif row['tumor_marker_level'] > 25:
+                score += 2
+            elif row['tumor_marker_level'] > 10:
+                score += 1
+            
+            if row['tumor_size_cm'] > 5:
+                score += 4
+            elif row['tumor_size_cm'] > 2:
+                score += 2
+            elif row['tumor_size_cm'] > 0.5:
+                score += 1
+            
+            if row['imaging_abnormality'] == 1:
+                score += 3
+            
+            if row['hemoglobin_level'] < 12 and row['gender'] == 'Female':
+                score += 2
+            elif row['hemoglobin_level'] < 13.5 and row['gender'] == 'Male':
+                score += 2
+            
+            if row['platelet_count'] > 400000 or row['platelet_count'] < 150000:
+                score += 1
+            
+            return score
+        
+        patient_df['clinical_risk_score'] = patient_df.apply(calculate_clinical_risk, axis=1)
+        
+        # Make predictions
+        model = models[model_name]
+        
+        if hasattr(model, 'predict_proba'):
+            predictions = model.predict(patient_df)
+            probabilities = model.predict_proba(patient_df)[:, 1]
+        else:
+            processed_data = preprocessor.transform(patient_df)
+            predictions = model.predict(processed_data)
+            probabilities = model.predict_proba(processed_data)[:, 1]
+        
+        # Prepare response
+        prediction_results = []
         positive_cases = 0
         
-        # Process each patient
-        for patient in request.patients:
-            patient_dict = patient.dict()
-            patient_id = patient_dict.pop("patient_id")
-            df = pd.DataFrame([patient_dict])
-            
-            probability = pipeline.predict_proba(df)[0, 1]
-            prediction = 1 if probability >= 0.5 else 0
-            
-            if prediction == 1:
-                positive_cases += 1
-            
-            # Calculate risk level
-            if probability < 0.3:
+        for i, (pred, prob) in enumerate(zip(predictions, probabilities)):
+            # Determine risk level
+            if prob < 0.3:
                 risk_level = "Low"
-            elif probability < 0.7:
+            elif prob < 0.7:
                 risk_level = "Medium"
             else:
                 risk_level = "High"
             
-            confidence = abs(probability - 0.5) * 2
+            prediction_results.append({
+                "patient_id": i + 1,
+                "prediction": int(pred),
+                "probability": float(prob),
+                "cancer_risk": risk_level
+            })
             
-            clinical_insights = generate_clinical_insights(patient_dict, probability)
-            
-            predictions.append(PredictionResponse(
-                patient_id=patient_id,
-                prediction=prediction,
-                probability=probability,
-                risk_level=risk_level,
-                confidence=confidence,
-                model_used=request.model_name,
-                timestamp=datetime.now().isoformat(),
-                clinical_insights=clinical_insights
-            ))
+            if pred == 1:
+                positive_cases += 1
         
-        # Calculate statistics
-        total_patients = len(request.patients)
-        negative_cases = total_patients - positive_cases
-        average_risk = sum([p.probability for p in predictions]) / total_patients
-        
-        processing_time = (datetime.now() - start_time).total_seconds()
-        
-        # Increment prediction counter for each patient
-        for _ in range(total_patients):
-            api_manager.increment_predictions()
+        total_patients = len(predictions)
+        positive_percentage = (positive_cases / total_patients * 100) if total_patients > 0 else 0
         
         return BatchPredictionResponse(
-            predictions=predictions,
+            predictions=prediction_results,
+            model_used=model_name,
+            timestamp=datetime.now().isoformat(),
             total_patients=total_patients,
             positive_cases=positive_cases,
-            negative_cases=negative_cases,
-            average_risk=average_risk,
-            model_used=request.model_name,
-            processing_time=processing_time
+            positive_percentage=round(positive_percentage, 2)
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch prediction error: {str(e)}")
 
 @app.get("/models", response_model=List[ModelInfo], tags=["Models"])
-async def list_models():
-    """List all available models with their performance metrics"""
+async def get_models():
+    """
+    Get information about all available models
+    """
     try:
         models_info = []
         
-        for model_name, pipeline in api_manager.models.items():
-            metrics = api_manager.model_metrics.get(model_name, {})
+        for model_name, performance in model_metadata.get("performance", {}).items():
+            model_key = model_name.replace(" ", "_").lower()
             
-            # Get model type from the pipeline
-            model_obj = pipeline.named_steps.get('model')
-            model_type = type(model_obj).__name__ if model_obj else "Unknown"
-            
-            # Get features used
-            features_used = api_manager.feature_names
+            # Try to get model parameters
+            params = {}
+            if model_key in models:
+                model = models[model_key]
+                if hasattr(model, 'get_params'):
+                    params = model.get_params()
             
             models_info.append(ModelInfo(
                 name=model_name,
-                type=model_type,
-                accuracy=metrics.get('accuracy', 0.0),
-                roc_auc=metrics.get('roc_auc', 0.0),
-                precision=metrics.get('precision', 0.0),
-                recall=metrics.get('recall', 0.0),
-                f1_score=metrics.get('f1_score', 0.0),
-                features_used=features_used[:20],  # First 20 features
-                training_date=datetime.now().strftime("%Y-%m-%d"),
-                hyperparameters=model_obj.get_params() if hasattr(model_obj, 'get_params') else {}
+                type=model_name,
+                accuracy=performance.get("accuracy", 0.0),
+                roc_auc=performance.get("roc_auc", 0.0),
+                f1_score=performance.get("f1_score", 0.0),
+                parameters=params
             ))
         
         return models_info
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving model information: {str(e)}")
 
-@app.get("/health", response_model=APIHealthResponse, tags=["Monitoring"])
+@app.get("/health", response_model=HealthCheck, tags=["Health"])
 async def health_check():
-    """Check API health status and statistics"""
+    """
+    Check API health status
+    """
     try:
-        import sys
+        models_loaded = list(models.keys())
         
-        return APIHealthResponse(
+        return HealthCheck(
             status="healthy",
-            version="1.0.0",
-            uptime=api_manager.get_uptime(),
-            models_loaded=len(api_manager.models),
-            total_predictions=api_manager.total_predictions,
-            memory_usage=api_manager.get_memory_usage()
+            timestamp=datetime.now().isoformat(),
+            models_loaded=models_loaded,
+            api_version="1.0.0"
         )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
 
-@app.get("/features", tags=["Models"])
-async def list_features():
-    """List all feature names used by the models"""
+@app.get("/features", tags=["Information"])
+async def get_features():
     try:
         return {
-            "total_features": len(api_manager.feature_names),
-            "features": api_manager.feature_names,
-            "categorical_features": [f for f in api_manager.feature_names if '_' in f],
-            "numerical_features": [f for f in api_manager.feature_names if '_' not in f]
+            "total_features": len(feature_names),
+            "features": feature_names,
+            "categorical_columns": model_metadata.get("categorical_columns", []),
+            "numerical_columns": model_metadata.get("numerical_columns", [])
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list features: {str(e)}")
-
-@app.post("/train", tags=["Models"])
-async def train_model(background_tasks: BackgroundTasks):
-    """
-    Trigger model training in the background
-    
-    This endpoint starts the training pipeline asynchronously
-    """
-    try:
-        # Add training task to background
-        background_tasks.add_task(train_and_update_models)
-        
-        return {
-            "message": "Model training started in background",
-            "status": "processing",
-            "timestamp": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Training failed to start: {str(e)}")
-
-def generate_clinical_insights(patient_data: dict, probability: float) -> dict:
-    """Generate clinical insights based on patient data and prediction"""
-    insights = {
-        "risk_factors": [],
-        "protective_factors": [],
-        "recommendations": [],
-        "alerts": []
-    }
-    
-    # Analyze risk factors
-    if patient_data.get('family_history_cancer') == 1:
-        insights["risk_factors"].append("Family history of cancer")
-    
-    if patient_data.get('smoking_status') == 'Current':
-        insights["risk_factors"].append("Current smoker")
-    
-    if patient_data.get('lump_presence') == 1:
-        insights["risk_factors"].append("Presence of lump")
-        insights["alerts"].append("Immediate medical consultation recommended for lump evaluation")
-    
-    if patient_data.get('tumor_marker_level', 0) > 10:
-        insights["risk_factors"].append(f"Elevated tumor marker level ({patient_data.get('tumor_marker_level'):.1f})")
-    
-    if patient_data.get('tumor_size_cm', 0) > 2:
-        insights["risk_factors"].append(f"Significant tumor size ({patient_data.get('tumor_size_cm'):.1f} cm)")
-        insights["alerts"].append("Tumor size warrants immediate medical attention")
-    
-    # Analyze protective factors
-    if patient_data.get('physical_activity_level') == 'High':
-        insights["protective_factors"].append("High physical activity level")
-    
-    if patient_data.get('diet_quality') == 'Good':
-        insights["protective_factors"].append("Good diet quality")
-    
-    if patient_data.get('alcohol_consumption') == 'Never':
-        insights["protective_factors"].append("No alcohol consumption")
-    
-    # Generate recommendations
-    if probability > 0.7:
-        insights["recommendations"].extend([
-            "Immediate consultation with oncologist recommended",
-            "Consider advanced imaging (MRI/PET scan)",
-            "Biopsy may be warranted"
-        ])
-    elif probability > 0.3:
-        insights["recommendations"].extend([
-            "Regular follow-up with primary care physician",
-            "Consider referral to specialist",
-            "Monitor symptoms closely"
-        ])
-    else:
-        insights["recommendations"].append("Routine screening recommended based on age and risk factors")
-    
-    # Add general recommendations
-    if patient_data.get('smoking_status') in ['Current', 'Former']:
-        insights["recommendations"].append("Smoking cessation counseling recommended")
-    
-    if patient_data.get('bmi', 25) > 25:
-        insights["recommendations"].append("Weight management consultation recommended")
-    
-    return insights
-
-def train_and_update_models():
-    """Background task to train models and update API"""
-    print("\n" + "="*60)
-    print("BACKGROUND MODEL TRAINING STARTED")
-    print("="*60)
-    
-    try:
-        # Run the full training pipeline
-        results, kfold_results, tuning_results, best_models, pca_results, regularization_results = run_machine_learning_pipeline()
-        
-        print("\n" + "="*60)
-        print("BACKGROUND MODEL TRAINING COMPLETED")
-        print("="*60)
-        print("✓ Models have been updated")
-        print("✓ API is ready with new models")
-        
-    except Exception as e:
-        print(f"\n✗ Background training failed: {str(e)}")
-
- 
-# MAIN EXECUTION
- 
+        raise HTTPException(status_code=500, detail=f"Error retrieving feature information: {str(e)}")
 
 def main():
     print("="*60)
-    print("AI THUNDERBALL - CANCER DETECTION DATA PIPELINE WITH API")
+    print("AI THUNDERBALL - CANCER DETECTION DATA PIPELINE")
     print("="*60)
-    print("\nIncludes:")
-    print("• Complete ML Pipeline with Regularization")
-    print("• FastAPI RESTful Web Service")
-    print("• Real-time Predictions")
-    print("• Batch Processing")
-    print("• Model Management")
-    print("• Health Monitoring\n")
     
-    # Run the ML pipeline (this will also load models into API)
+    # Run the full pipeline
     generate_synthetic_data()
     introduce_anomalies()
     clean_data()
@@ -2100,50 +2180,21 @@ def main():
     
     print("\n" + "="*60)
     print("PIPELINE EXECUTION COMPLETED SUCCESSFULLY!")
-    print("✓ 11 Visualizations Saved")
-    print("✓ 4 CSV Results Files Generated")
-    print("✓ Regularization Analysis Complete")
-    print("✓ API Models Loaded and Ready")
-    print("\nTo start the API server, run:")
-    print("    uvicorn filename:app --reload --host 0.0.0.0 --port 8000")
-    print("\nAPI Documentation available at:")
-    print("    http://localhost:8000/docs")
-    print("="*60)
-
-def run_api():
-    """Function to run the API server"""
-    print("\n" + "="*60)
-    print("STARTING AI THUNDERBALL API SERVER")
-    print("="*60)
-    print("\nAPI Endpoints:")
-    print("• http://localhost:8000/           - API information")
-    print("• http://localhost:8000/docs       - Interactive documentation")
-    print("• http://localhost:8000/predict    - Single prediction")
-    print("• http://localhost:8000/predict-batch - Batch predictions")
-    print("• http://localhost:8000/models     - List models")
-    print("• http://localhost:8000/health     - Health check")
-    print("• http://localhost:8000/features   - List features")
-    print("\nPress Ctrl+C to stop the server")
     print("="*60)
     
+    # Start the API server
+    print("\n" + "="*60)
+    print("STARTING FASTAPI SERVER")
+    print("="*60)
+    print("\nAPI endpoints available at:")
+    print("  - http://localhost:8000")
+    print("  - http://localhost:8000/docs (Swagger UI)")
+    print("  - http://localhost:8000/redoc (ReDoc UI)")
+    print("\nTo run the API separately, use: uvicorn script_name:app --reload")
+    print("="*60)
+    
+    # Run the API
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) > 1 and sys.argv[1] == "--api":
-        # Check if models are already trained
-        if not api_manager.models:
-            print("Models not found. Running training pipeline first...")
-            main()
-        
-        # Start API server
-        run_api()
-    else:
-        # Run full pipeline (training + visualizations)
-        main()
-        
-        # Ask if user wants to start API
-        response = input("\nDo you want to start the API server? (yes/no): ").lower()
-        if response in ['yes', 'y']:
-            run_api()
+    main()
