@@ -29,7 +29,6 @@ Manual diagnosis of cancer based on biopsy reports can be time-consuming and pro
 
 ## Machine Learning Algorithms
 - Logistic Regression
-- Support Vector Machine (SVM)
 - Random Forest Classifier
 - K-Nearest Neighbors (KNN)
 
