@@ -45,5 +45,7 @@ Manual diagnosis of cancer based on biopsy reports can be time-consuming and pro
 ---
 
 ## Results
-- High accuracy in cancer cell prediction
-- Effective classification of tumors
+- Achieved high accuracy in cancer cell classification
+- Random Forest showed better performance compared to linear models
+- CTGAN helped address class imbalance through synthetic data generation
+- Effective and reliable tumor classification
