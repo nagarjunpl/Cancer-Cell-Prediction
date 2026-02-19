@@ -15,8 +15,11 @@ from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, 
-    roc_auc_score, confusion_matrix, roc_curve
+    roc_auc_score, confusion_matrix, roc_curve,
+    confusion_matrix, roc_curve, auc, precision_recall_curve,
+    classification_report, roc_auc_score, average_precision_score
 )
+from sklearn.metrics import f1_score as sklearn_f1_score
 from sklearn.model_selection import validation_curve
 import joblib
 import json
@@ -299,8 +302,8 @@ def engineer_features(input_file="AI_Thunderball_CleanedDataset.csv",
     print(f"  BMI range: {df_engineered['bmi'].min():.1f} - {df_engineered['bmi'].max():.1f}")
     print(f"  Clinical Risk Score range: {df_engineered['clinical_risk_score'].min()} - {df_engineered['clinical_risk_score'].max()}")
     print(f"  Lifestyle Risk Score range: {df_engineered['lifestyle_risk_score'].min()} - {df_engineered['lifestyle_risk_score'].max()}")
-    print(f"\n✓ Saved engineered dataset to: '{output_file}'")
-    print(f"✓ Dataset shape: {df_engineered.shape}")
+    print(f"\n Saved engineered dataset to: '{output_file}'")
+    print(f" Dataset shape: {df_engineered.shape}")
     
     return df_engineered
 
@@ -559,7 +562,7 @@ def pca_analysis(X_train, y_train, X_test, y_test, preprocessor, variance_thresh
     
     plt.tight_layout()
     plt.savefig("09_pca_analysis.png", dpi=300, bbox_inches='tight')
-    print("     ✓ Saved: 09_pca_analysis.png")
+    print("      Saved: 09_pca_analysis.png")
     plt.show()
     
     print("\n[5/6] Comparing model performance with vs without PCA...")
@@ -652,12 +655,12 @@ def pca_analysis(X_train, y_train, X_test, y_test, preprocessor, variance_thresh
     
     plt.tight_layout()
     plt.savefig("10_pca_model_comparison.png", dpi=300, bbox_inches='tight')
-    print("     ✓ Saved: 10_pca_model_comparison.png")
+    print("      Saved: 10_pca_model_comparison.png")
     plt.show()
     
     results_df = pd.DataFrame(comparison_results)
     results_df.to_csv("pca_comparison_results.csv", index=False)
-    print("     ✓ Saved: pca_comparison_results.csv")
+    print("      Saved: pca_comparison_results.csv")
     
     print("\n" + "="*60)
     print("PCA ANALYSIS SUMMARY")
@@ -887,7 +890,7 @@ def hyperparameter_tuning(X_train, y_train, X_test, y_test, preprocessor):
     
     plt.tight_layout()
     plt.savefig("08_hyperparameter_tuning_comparison.png", dpi=300, bbox_inches='tight')
-    print("\n✓ Saved: 08_hyperparameter_tuning_comparison.png")
+    print("\n Saved: 08_hyperparameter_tuning_comparison.png")
     plt.show()
     
     results_df = pd.DataFrame([{
@@ -906,7 +909,7 @@ def hyperparameter_tuning(X_train, y_train, X_test, y_test, preprocessor):
     } for r in tuning_results])
     
     results_df.to_csv("hyperparameter_tuning_results.csv", index=False)
-    print("✓ Saved: hyperparameter_tuning_results.csv")
+    print(" Saved: hyperparameter_tuning_results.csv")
     
     return tuning_results, best_models
 
@@ -923,9 +926,9 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
     print("L2 (Ridge): Shrinks coefficients evenly")
     print("ElasticNet: Combines L1 and L2")
     
-    # =========================================================
+    
     # 1. Logistic Regression with different regularization types
-    # =========================================================
+    
     print("\n[1/4] Logistic Regression with different regularization types...")
     
     # Define models with different regularization
@@ -944,18 +947,14 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
             ("model", model)
         ])
         
-        # Fit the model
         pipeline.fit(X_train, y_train)
         
-        # Get predictions
         y_pred = pipeline.predict(X_test)
         y_prob = pipeline.predict_proba(X_test)[:, 1]
         
-        # Calculate metrics
         train_score = pipeline.score(X_train, y_train)
         test_score = pipeline.score(X_test, y_test)
         
-        # Calculate number of non-zero coefficients (for feature selection analysis)
         if hasattr(pipeline.named_steps['model'], 'coef_'):
             coef = pipeline.named_steps['model'].coef_
             if len(coef.shape) > 1:
@@ -968,7 +967,7 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
             "Regularization": name,
             "Train_Accuracy": train_score,
             "Test_Accuracy": test_score,
-            "Accuracy_Diff": train_score - test_score,  # Overfitting measure
+            "Accuracy_Diff": train_score - test_score,  
             "ROC_AUC": roc_auc_score(y_test, y_prob),
             "Non_Zero_Coefficients": non_zero_coef,
             "model": pipeline
@@ -981,9 +980,9 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
         if non_zero_coef is not None:
             print(f"    Non-zero coefficients: {non_zero_coef}")
     
-    # =========================================================
+    
     # 2. Validation curve for regularization strength (C parameter)
-    # =========================================================
+    
     print("\n[2/4] Validation curve for regularization strength...")
     
     # Create pipeline
@@ -992,10 +991,8 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
         ("model", LogisticRegression(penalty='l2', max_iter=1000, solver='lbfgs'))
     ])
     
-    # Define range of C values (inverse of regularization strength)
     param_range = np.logspace(-3, 3, 10)
     
-    # Calculate training and validation scores
     train_scores, test_scores = validation_curve(
         pipeline, X_train, y_train,
         param_name="model__C",
@@ -1005,15 +1002,14 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
         n_jobs=-1
     )
     
-    # Calculate mean and std
     train_mean = np.mean(train_scores, axis=1)
     train_std = np.std(train_scores, axis=1)
     test_mean = np.mean(test_scores, axis=1)
     test_std = np.std(test_scores, axis=1)
     
-    # =========================================================
+    
     # 3. SVM with different regularization strengths
-    # =========================================================
+    
     print("\n[3/4] SVM with different regularization strengths...")
     
     svm_c_values = [0.001, 0.01, 0.1, 1, 10, 100]
@@ -1039,9 +1035,9 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
     
     print(f"  C values analyzed: {svm_c_values}")
     
-    # =========================================================
+    
     # 4. Neural Network with dropout (simulated via alpha parameter)
-    # =========================================================
+    
     print("\n[4/4] Neural Network with L2 regularization...")
     
     nn_alphas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
@@ -1052,7 +1048,7 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
             ("preprocessor", preprocessor),
             ("model", MLPClassifier(
                 hidden_layer_sizes=(50, 25),
-                alpha=alpha,  # L2 regularization parameter
+                alpha=alpha, 
                 max_iter=1000,
                 random_state=42
             ))
@@ -1072,9 +1068,9 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
     
     print(f"  Alpha values analyzed: {nn_alphas}")
     
-    # =========================================================
+    
     # 5. Visualizations
-    # =========================================================
+    
     print("\n[5/5] Creating regularization visualizations...")
     
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
@@ -1101,7 +1097,6 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
     ax1.set_ylim([0.5, 1.0])
     ax1.grid(True, alpha=0.3)
     
-    # Add values on bars
     for bar in bars1 + bars2:
         height = bar.get_height()
         ax1.text(bar.get_x() + bar.get_width()/2., height, f'{height:.3f}',
@@ -1166,7 +1161,6 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
     ax4.legend()
     ax4.grid(True, alpha=0.3)
     
-    # Mark optimal alpha for NN
     optimal_nn_idx = np.argmax(nn_test)
     optimal_nn_alpha = nn_alpha[optimal_nn_idx]
     ax4.axvline(x=optimal_nn_alpha, color='green', linestyle='--', linewidth=2, label=f'Optimal α = {optimal_nn_alpha}')
@@ -1174,12 +1168,11 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
     
     plt.tight_layout()
     plt.savefig("11_regularization_analysis.png", dpi=300, bbox_inches='tight')
-    print("✓ Saved: 11_regularization_analysis.png")
+    print(" Saved: 11_regularization_analysis.png")
     plt.show()
     
-    # =========================================================
     # 6. Coefficient analysis for L1 vs L2 regularization
-    # =========================================================
+    
     print("\n[6/6] Coefficient analysis for L1 vs L2 regularization...")
     
     # Get feature names
@@ -1250,7 +1243,7 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
     
     plt.tight_layout()
     plt.savefig("12_regularization_coefficients.png", dpi=300, bbox_inches='tight')
-    print("✓ Saved: 12_regularization_coefficients.png")
+    print(" Saved: 12_regularization_coefficients.png")
     plt.show()
     
     # Summary statistics
@@ -1277,7 +1270,7 @@ def regularization_analysis(X_train, y_train, X_test, y_test, preprocessor):
     # Save results to CSV
     reg_results_df = pd.DataFrame(logistic_results)
     reg_results_df.to_csv("regularization_results.csv", index=False)
-    print("\n✓ Saved: regularization_results.csv")
+    print("\n Saved: regularization_results.csv")
     
     regularization_results = {
         "logistic_results": logistic_results,
@@ -1396,7 +1389,7 @@ def run_machine_learning_pipeline():
     
     plt.tight_layout()
     plt.savefig("01_model_performance_comparison.png", dpi=300, bbox_inches='tight')
-    print("\n✓ Saved: 01_model_performance_comparison.png")
+    print("\n Saved: 01_model_performance_comparison.png")
     plt.show()
     
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -1417,7 +1410,7 @@ def run_machine_learning_pipeline():
     
     plt.tight_layout()
     plt.savefig("02_model_ranking_roc_auc.png", dpi=300, bbox_inches='tight')
-    print("✓ Saved: 02_model_ranking_roc_auc.png")
+    print(" Saved: 02_model_ranking_roc_auc.png")
     plt.show()
     
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
@@ -1434,7 +1427,7 @@ def run_machine_learning_pipeline():
     
     plt.tight_layout()
     plt.savefig("03_confusion_matrices.png", dpi=300, bbox_inches='tight')
-    print("✓ Saved: 03_confusion_matrices.png")
+    print(" Saved: 03_confusion_matrices.png")
     plt.show()
     
     fig, ax = plt.subplots(figsize=(12, 10))
@@ -1445,7 +1438,7 @@ def run_machine_learning_pipeline():
     ax.set_title("Feature Correlation Heatmap (Numerical Features)", fontsize=14, fontweight='bold')
     plt.tight_layout()
     plt.savefig("04_correlation_heatmap.png", dpi=300, bbox_inches='tight')
-    print("✓ Saved: 04_correlation_heatmap.png")
+    print(" Saved: 04_correlation_heatmap.png")
     plt.show()
     
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
@@ -1481,7 +1474,7 @@ def run_machine_learning_pipeline():
     
     plt.tight_layout()
     plt.savefig("05_top_features_importance.png", dpi=300, bbox_inches='tight')
-    print("✓ Saved: 05_top_features_importance.png")
+    print(" Saved: 05_top_features_importance.png")
     plt.show()
     
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -1513,7 +1506,7 @@ def run_machine_learning_pipeline():
     
     plt.tight_layout()
     plt.savefig("06_performance_vs_matrix_metrics.png", dpi=300, bbox_inches='tight')
-    print("✓ Saved: 06_performance_vs_matrix_metrics.png")
+    print(" Saved: 06_performance_vs_matrix_metrics.png")
     plt.show()
     
     fig, ax = plt.subplots(figsize=(10, 8))
@@ -1535,50 +1528,50 @@ def run_machine_learning_pipeline():
     
     plt.tight_layout()
     plt.savefig("07_roc_auc_curves.png", dpi=300, bbox_inches='tight')
-    print("✓ Saved: 07_roc_auc_curves.png")
+    print(" Saved: 07_roc_auc_curves.png")
     plt.show()
     
-    # =========================================================
+    
     # PCA DIMENSIONALITY REDUCTION
-    # =========================================================
+    
     pca_results, X_train_pca, X_test_pca = pca_analysis(X_train, y_train, X_test, y_test, preprocessor)
     
-    # =========================================================
+    
     # HYPERPARAMETER TUNING
-    # =========================================================
+    
     tuning_results, best_models = hyperparameter_tuning(X_train, y_train, X_test, y_test, preprocessor)
     
-    # =========================================================
+    
     # REGULARIZATION ANALYSIS
-    # =========================================================
+    
     regularization_results = regularization_analysis(X_train, y_train, X_test, y_test, preprocessor)
     
-    # =========================================================
+    
     # SAVE MODELS FOR API USE
-    # =========================================================
+    
     print("\n" + "="*60)
     print("SAVING MODELS FOR API DEPLOYMENT")
     print("="*60)
     
     # Save the preprocessor
     joblib.dump(preprocessor, 'api_preprocessor.pkl')
-    print("✓ Saved: api_preprocessor.pkl")
+    print(" Saved: api_preprocessor.pkl")
     
     # Save all trained models
     for name, model in best_models.items():
         joblib.dump(model, f'api_model_{name.replace(" ", "_").lower()}.pkl')
-        print(f"✓ Saved: api_model_{name.replace(' ', '_').lower()}.pkl")
+        print(f" Saved: api_model_{name.replace(' ', '_').lower()}.pkl")
     
     # Save the best model (Random Forest usually performs best)
     best_model_name = max(tuning_results, key=lambda x: x['Tuned_ROC_AUC'])['Model']
     best_model = best_models[best_model_name]
     joblib.dump(best_model, 'api_best_model.pkl')
-    print(f"✓ Saved best model ({best_model_name}): api_best_model.pkl")
+    print(f" Saved best model ({best_model_name}): api_best_model.pkl")
     
     # Save feature names for API reference
     with open('api_feature_names.json', 'w') as f:
         json.dump(feature_names, f)
-    print("✓ Saved: api_feature_names.json")
+    print(" Saved: api_feature_names.json")
     
     # Save model metadata
     model_metadata = {
@@ -1597,20 +1590,355 @@ def run_machine_learning_pipeline():
     
     with open('api_model_metadata.json', 'w') as f:
         json.dump(model_metadata, f, indent=2)
-    print("✓ Saved: api_model_metadata.json")
+    print(" Saved: api_model_metadata.json")
     
     print("\n" + "="*50)
-    print("✓ All visualizations have been saved successfully!")
-    print("✓ All models have been saved for API deployment!")
+    print(" All visualizations have been saved successfully!")
+    print(" All models have been saved for API deployment!")
     print("="*50)
     
     return results, kfold_results, tuning_results, best_models, pca_results, regularization_results
 
-# =========================================================
-# FASTAPI ENDPOINTS IMPLEMENTATION
-# =========================================================
 
-# Pydantic models for request/response validation
+def analyze_gradient_boosting_model():
+    
+    print("="*70)
+    print("GRADIENT BOOSTING MODEL - COMPREHENSIVE ANALYSIS")
+    print("="*70)
+    
+    
+    # 1. LOAD DATA AND MODEL
+    
+    print("\n[1/5] Loading data and model...")
+    
+    try:
+        # Load the best model (Gradient Boosting)
+        model = joblib.load('api_model_gradient_boosting.pkl')
+        print(" Model loaded: Gradient Boosting")
+    except:
+        try:
+            model = joblib.load('api_best_model.pkl')
+            print(" Model loaded: Best model (should be Gradient Boosting)")
+        except:
+            print(" Could not load model. Please ensure model files exist.")
+            return
+    
+    try:
+        df = pd.read_csv("AI_Thunderball_FeatureEngineeredDataset.csv")
+        print(f" Data loaded: {df.shape[0]} rows, {df.shape[1]} columns")
+    except:
+        print(" Could not load feature engineered dataset.")
+        return
+    
+    # Separate features and target
+    y_true = df["cancer"]
+    X = df.drop(columns=["cancer", "patient_id"])
+    
+    print(f"  Features: {X.shape[1]}")
+    print(f"  Positive cases: {y_true.sum()} ({y_true.mean()*100:.1f}%)")
+    print(f"  Negative cases: {(~y_true.astype(bool)).sum()} {(1-y_true.mean())*100:.1f}%")
+    
+    
+    # 2. GENERATE PREDICTIONS
+    
+    print("\n[2/5] Generating predictions...")
+    
+    # Make predictions
+    if hasattr(model, 'predict_proba'):
+        y_pred = model.predict(X)
+        y_prob = model.predict_proba(X)[:, 1]
+    else:
+        # If model is a pipeline, handle appropriately
+        if hasattr(model, 'named_steps'):
+            y_pred = model.predict(X)
+            y_prob = model.predict_proba(X)[:, 1]
+        else:
+            print(" Model doesn't have predict_proba method")
+            return
+    
+    # Create DataFrame with predictions
+    predictions_df = df.copy()
+    predictions_df['predicted_cancer'] = y_pred
+    predictions_df['cancer_probability'] = y_prob
+    predictions_df['prediction_correct'] = (y_pred == y_true)
+    predictions_df['probability_rounded'] = np.round(y_prob * 100, 2)
+    
+    
+    # 3. CONFUSION MATRIX ANALYSIS
+    
+    print("\n[3/5] Confusion Matrix Analysis...")
+    
+    # Calculate confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    cm_normalized = confusion_matrix(y_true, y_pred, normalize='true')
+    
+    # Calculate metrics
+    tn, fp, fn, tp = cm.ravel()
+    total = tn + fp + fn + tp
+    
+    accuracy = (tp + tn) / total
+    sensitivity = tp / (tp + fn)  # Recall for positive class
+    specificity = tn / (tn + fp)
+    precision = tp / (tp + fp)
+    f1_score_value = 2 * (precision * sensitivity) / (precision + sensitivity)  # Renamed to avoid conflict
+    
+    print(f"\n  Confusion Matrix (Raw Counts):")
+    print(f"  {'':<15} {'Predicted Negative':<20} {'Predicted Positive':<20}")
+    print(f"  {'Actual Negative':<15} {tn:<20} {fp:<20}")
+    print(f"  {'Actual Positive':<15} {fn:<20} {tp:<20}")
+    
+    print(f"\n  Confusion Matrix (Normalized):")
+    print(f"  {'':<15} {'Predicted Negative':<20} {'Predicted Positive':<20}")
+    print(f"  {'Actual Negative':<15} {cm_normalized[0,0]:.3f} ({cm_normalized[0,0]*100:.1f}%){str('').ljust(12)} {cm_normalized[0,1]:.3f} ({cm_normalized[0,1]*100:.1f}%)")
+    print(f"  {'Actual Positive':<15} {cm_normalized[1,0]:.3f} ({cm_normalized[1,0]*100:.1f}%){str('').ljust(12)} {cm_normalized[1,1]:.3f} ({cm_normalized[1,1]*100:.1f}%)")
+    
+    print(f"\n  Performance Metrics:")
+    print(f"  Accuracy    : {accuracy:.4f} ({accuracy*100:.2f}%)")
+    print(f"  Sensitivity : {sensitivity:.4f} ({sensitivity*100:.2f}%) - True Positive Rate")
+    print(f"  Specificity : {specificity:.4f} ({specificity*100:.2f}%) - True Negative Rate")
+    print(f"  Precision   : {precision:.4f} ({precision*100:.2f}%)")
+    print(f"  F1-Score    : {f1_score_value:.4f} ({f1_score_value*100:.2f}%)")
+    
+    
+    # 4. ROC-AUC CURVE
+    
+    print("\n[4/5] ROC-AUC Curve Analysis...")
+    
+    # Calculate ROC curve
+    fpr, tpr, thresholds_roc = roc_curve(y_true, y_prob)
+    roc_auc = auc(fpr, tpr)
+    
+    # Find optimal threshold (Youden's index)
+    youden_j = tpr - fpr
+    optimal_idx = np.argmax(youden_j)
+    optimal_threshold_roc = thresholds_roc[optimal_idx]
+    
+    print(f"  ROC-AUC Score: {roc_auc:.4f}")
+    print(f"  Optimal threshold (Youden's index): {optimal_threshold_roc:.4f}")
+    print(f"    At threshold {optimal_threshold_roc:.4f}: TPR={tpr[optimal_idx]:.4f}, FPR={fpr[optimal_idx]:.4f}")
+    
+    
+    # 5. PRECISION-RECALL CURVE
+    
+    print("\n[5/5] Precision-Recall Curve Analysis...")
+    
+    # Calculate Precision-Recall curve
+    precision_vals, recall_vals, thresholds_pr = precision_recall_curve(y_true, y_prob)
+    avg_precision = average_precision_score(y_true, y_prob)
+    
+    # Calculate F1 scores for each threshold
+    f1_scores = 2 * (precision_vals[:-1] * recall_vals[:-1]) / (precision_vals[:-1] + recall_vals[:-1] + 1e-10)
+    best_f1_idx = np.argmax(f1_scores)
+    best_threshold_pr = thresholds_pr[best_f1_idx]
+    
+    print(f"  Average Precision: {avg_precision:.4f}")
+    print(f"  Best F1 threshold: {best_threshold_pr:.4f}")
+    print(f"    At threshold {best_threshold_pr:.4f}: Precision={precision_vals[best_f1_idx]:.4f}, Recall={recall_vals[best_f1_idx]:.4f}, F1={f1_scores[best_f1_idx]:.4f}")
+    
+    
+    # 6. PROBABILITY DISTRIBUTION ANALYSIS
+    
+    print("\n[6/5] Probability Distribution Analysis...")
+    
+    # Separate probabilities by actual class
+    prob_negative = y_prob[y_true == 0]
+    prob_positive = y_prob[y_true == 1]
+    
+    print(f"\n  Probability Statistics:")
+    print(f"  {'Class':<15} {'Count':<10} {'Mean':<10} {'Std':<10} {'Min':<10} {'Max':<10}")
+    print(f"  {'-'*60}")
+    print(f"  {'Negative (0)':<15} {len(prob_negative):<10} {prob_negative.mean():<10.4f} {prob_negative.std():<10.4f} {prob_negative.min():<10.4f} {prob_negative.max():<10.4f}")
+    print(f"  {'Positive (1)':<15} {len(prob_positive):<10} {prob_positive.mean():<10.4f} {prob_positive.std():<10.4f} {prob_positive.min():<10.4f} {prob_positive.max():<10.4f}")
+    
+    
+    # 7. CREATE VISUALIZATIONS (ONLY REQUESTED PLOTS)
+    
+    print("\n[7/5] Creating visualizations...")
+    
+    # Create a figure with 2x2 grid for the 4 requested plots
+    fig = plt.figure(figsize=(16, 14))
+    fig.suptitle("Gradient Boosting Model - Key Performance Visualizations", fontsize=16, fontweight='bold')
+    
+    # 7.1 Confusion Matrix (Raw) - First plot
+    ax1 = plt.subplot(2, 2, 1)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax1,
+                xticklabels=['Predicted Negative', 'Predicted Positive'],
+                yticklabels=['Actual Negative', 'Actual Positive'],
+                cbar_kws={'label': 'Count'})
+    ax1.set_title('Confusion Matrix (Raw Counts)', fontweight='bold', fontsize=14)
+    ax1.set_xlabel('Predicted Label', fontweight='bold')
+    ax1.set_ylabel('True Label', fontweight='bold')
+    
+    # Add text annotations with metrics
+    ax1.text(0.5, -0.15, f'Accuracy: {accuracy:.3f} | Precision: {precision:.3f} | Recall: {sensitivity:.3f} | F1: {f1_score_value:.3f}',
+             transform=ax1.transAxes, ha='center', fontsize=11, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    # 7.2 ROC-AUC Curve - Second plot
+    ax2 = plt.subplot(2, 2, 2)
+    ax2.plot(fpr, tpr, color='darkorange', lw=3, label=f'ROC curve (AUC = {roc_auc:.4f})')
+    ax2.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random (AUC = 0.5)')
+    
+    # Mark optimal threshold
+    ax2.scatter(fpr[optimal_idx], tpr[optimal_idx], marker='o', color='red', s=150,
+               label=f'Optimal threshold = {optimal_threshold_roc:.3f}', zorder=5)
+    
+    ax2.set_xlim([0.0, 1.0])
+    ax2.set_ylim([0.0, 1.05])
+    ax2.set_xlabel('False Positive Rate (1 - Specificity)', fontweight='bold', fontsize=12)
+    ax2.set_ylabel('True Positive Rate (Sensitivity)', fontweight='bold', fontsize=12)
+    ax2.set_title('ROC-AUC Curve', fontweight='bold', fontsize=14)
+    ax2.legend(loc="lower right", fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    
+    # 7.3 Precision-Recall Curve - Third plot
+    ax3 = plt.subplot(2, 2, 3)
+    ax3.plot(recall_vals, precision_vals, color='green', lw=3, 
+            label=f'PR curve (AP = {avg_precision:.4f})')
+    ax3.axhline(y=y_true.mean(), color='gray', linestyle='--', lw=2,
+                label=f'Baseline (Prevalence = {y_true.mean():.3f})')
+    
+    # Mark best F1 threshold
+    ax3.scatter(recall_vals[best_f1_idx], precision_vals[best_f1_idx], 
+               marker='o', color='red', s=150,
+               label=f'Best F1 threshold = {best_threshold_pr:.3f}', zorder=5)
+    
+    ax3.set_xlim([0.0, 1.0])
+    ax3.set_ylim([0.0, 1.05])
+    ax3.set_xlabel('Recall (Sensitivity)', fontweight='bold', fontsize=12)
+    ax3.set_ylabel('Precision', fontweight='bold', fontsize=12)
+    ax3.set_title('Precision-Recall Curve', fontweight='bold', fontsize=14)
+    ax3.legend(loc="lower left", fontsize=10)
+    ax3.grid(True, alpha=0.3)
+    
+    # 7.4 Probability Distribution - Fourth plot
+    ax4 = plt.subplot(2, 2, 4)
+    
+    # Create histogram
+    n_bins = 20
+    ax4.hist([prob_negative, prob_positive], bins=n_bins, alpha=0.7, 
+             label=['Actual Negative (Class 0)', 'Actual Positive (Class 1)'],
+             color=['#3498db', '#e74c3c'], edgecolor='black', linewidth=1)
+    
+    # Add threshold lines
+    ax4.axvline(x=0.5, color='green', linestyle='--', linewidth=2.5, label='Default threshold (0.5)')
+    ax4.axvline(x=optimal_threshold_roc, color='orange', linestyle='--', linewidth=2.5, 
+                label=f'Optimal ROC threshold ({optimal_threshold_roc:.3f})')
+    ax4.axvline(x=best_threshold_pr, color='purple', linestyle='--', linewidth=2.5, 
+                label=f'Best F1 threshold ({best_threshold_pr:.3f})')
+    
+    ax4.set_xlabel('Predicted Probability of Cancer', fontweight='bold', fontsize=12)
+    ax4.set_ylabel('Frequency', fontweight='bold', fontsize=12)
+    ax4.set_title('Probability Distribution by Actual Class', fontweight='bold', fontsize=14)
+    ax4.legend(loc='upper center', fontsize=9, ncol=2)
+    ax4.grid(True, alpha=0.3)
+    
+    # Add statistics as text
+    stats_text = f"Class 0: μ={prob_negative.mean():.3f}, σ={prob_negative.std():.3f}\nClass 1: μ={prob_positive.mean():.3f}, σ={prob_positive.std():.3f}"
+    ax4.text(0.98, 0.98, stats_text, transform=ax4.transAxes, ha='right', va='top',
+             fontsize=10, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    plt.tight_layout()
+    plt.savefig("gradient_boosting_key_visualizations.png", dpi=300, bbox_inches='tight')
+    print(" Saved: gradient_boosting_key_visualizations.png")
+    plt.show()
+    
+    
+    # 8. PERFORMANCE METRICS TABLE
+    
+    print("\n" + "="*70)
+    print("PERFORMANCE METRICS SUMMARY")
+    print("="*70)
+    
+    # Create performance metrics DataFrame
+    metrics_data = {
+        'Metric': ['Accuracy', 'Precision', 'Recall (Sensitivity)', 'Specificity', 'F1-Score', 'ROC-AUC', 'Avg Precision'],
+        'Value': [accuracy, precision, sensitivity, specificity, f1_score_value, roc_auc, avg_precision],
+        'Formula': [
+            '(TP+TN)/(TP+TN+FP+FN)',
+            'TP/(TP+FP)',
+            'TP/(TP+FN)',
+            'TN/(TN+FP)',
+            '2*(Precision*Recall)/(Precision+Recall)',
+            'Area under ROC curve',
+            'Area under PR curve'
+        ]
+    }
+    
+    metrics_df = pd.DataFrame(metrics_data)
+    metrics_df['Value'] = metrics_df['Value'].apply(lambda x: f'{x:.4f}')
+    print("\n", metrics_df.to_string(index=False))
+    
+    # Save metrics to CSV
+    metrics_df.to_csv("gradient_boosting_performance_metrics.csv", index=False)
+    print("\n Saved: gradient_boosting_performance_metrics.csv")
+    
+    
+    # 9. THRESHOLD COMPARISON TABLE
+    
+    print("\n" + "="*70)
+    print("THRESHOLD COMPARISON")
+    print("="*70)
+    
+    thresholds_to_test = [0.3, 0.4, 0.5, 0.6, 0.7, optimal_threshold_roc, best_threshold_pr]
+    thresholds_to_test = sorted(set(thresholds_to_test)) 
+    
+    threshold_results = []
+    
+    for thresh in thresholds_to_test:
+        y_pred_thresh = (y_prob >= thresh).astype(int)
+        
+        acc = accuracy_score(y_true, y_pred_thresh)
+        prec = precision_score(y_true, y_pred_thresh, zero_division=0)
+        rec = recall_score(y_true, y_pred_thresh, zero_division=0)
+        f1 = f1_score(y_true, y_pred_thresh, zero_division=0)  
+        pos_predictions = y_pred_thresh.sum()
+        
+        threshold_results.append({
+            'Threshold': f'{thresh:.3f}',
+            'Accuracy': f'{acc:.4f}',
+            'Precision': f'{prec:.4f}',
+            'Recall': f'{rec:.4f}',
+            'F1-Score': f'{f1:.4f}',
+            'Pos Predictions': pos_predictions,
+            '% Pos Pred': f'{pos_predictions/len(y_true)*100:.1f}%'
+        })
+    
+    threshold_df = pd.DataFrame(threshold_results)
+    print("\n", threshold_df.to_string(index=False))
+    
+    # Save threshold comparison
+    threshold_df.to_csv("gradient_boosting_threshold_comparison.csv", index=False)
+    print("\n Saved: gradient_boosting_threshold_comparison.csv")
+    
+    print("\n" + "="*70)
+    print("ANALYSIS COMPLETE!")
+    print("="*70)
+    print("\nFiles generated:")
+    print("  1. gradient_boosting_key_visualizations.png - 4 key plots")
+    print("  2. gradient_boosting_performance_metrics.csv - Performance metrics table")
+    print("  3. gradient_boosting_threshold_comparison.csv - Threshold comparison")
+    
+    return predictions_df, {
+        'confusion_matrix': cm,
+        'roc_auc': roc_auc,
+        'fpr': fpr,
+        'tpr': tpr,
+        'precision_vals': precision_vals,
+        'recall_vals': recall_vals,
+        'avg_precision': avg_precision,
+        'y_prob': y_prob,
+        'y_pred': y_pred,
+        'y_true': y_true,
+        'accuracy': accuracy,
+        'precision': precision,
+        'sensitivity': sensitivity,
+        'specificity': specificity,
+        'f1_score': f1_score_value
+    }
+
+
+# FASTAPI ENDPOINTS IMPLEMENTATION
+
 class PatientData(BaseModel):
     age: int
     gender: str
@@ -1680,7 +2008,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Global variables for loaded models
 models = {}
 preprocessor = None
 feature_names = []
@@ -1696,11 +2023,9 @@ async def startup_event():
     print("="*60)
     
     try:
-        # Load preprocessor
         preprocessor = joblib.load('api_preprocessor.pkl')
-        print("✓ Preprocessor loaded")
+        print(" Preprocessor loaded")
         
-        # Load available models
         model_files = {
             "logistic_regression": "api_model_logistic_regression.pkl",
             "random_forest": "api_model_random_forest.pkl",
@@ -1712,26 +2037,24 @@ async def startup_event():
         for model_name, file_path in model_files.items():
             try:
                 models[model_name] = joblib.load(file_path)
-                print(f"✓ {model_name} loaded")
+                print(f" {model_name} loaded")
             except FileNotFoundError:
-                print(f"⚠ {model_name} not found, skipping...")
+                print(f" {model_name} not found, skipping...")
         
-        # Load feature names
         with open('api_feature_names.json', 'r') as f:
             feature_names = json.load(f)
-        print(f"✓ Feature names loaded ({len(feature_names)} features)")
+        print(f" Feature names loaded ({len(feature_names)} features)")
         
-        # Load model metadata
         with open('api_model_metadata.json', 'r') as f:
             model_metadata = json.load(f)
-        print("✓ Model metadata loaded")
+        print(" Model metadata loaded")
         
         print("="*60)
         print("API READY FOR REQUESTS")
         print("="*60)
         
     except Exception as e:
-        print(f"❌ Error loading models: {e}")
+        print(f" Error loading models: {e}")
         raise e
 
 @app.get("/", tags=["Root"])
@@ -1754,14 +2077,6 @@ async def predict(
     patient: PatientData,
     model_name: str = "best_model"
 ):
-    """
-    Make a cancer risk prediction for a single patient
-    
-    - **patient**: Patient data including demographics, lifestyle, and clinical features
-    - **model_name**: Model to use for prediction (default: best_model)
-    """
-    
-    # Check if model exists
     if model_name not in models:
         available_models = list(models.keys())
         raise HTTPException(
@@ -1770,14 +2085,11 @@ async def predict(
         )
     
     try:
-        # Convert patient data to DataFrame
         patient_dict = patient.dict()
         patient_df = pd.DataFrame([patient_dict])
         
-        # Apply feature engineering (same as in training)
         patient_df['bmi'] = patient_df['weight_kg'] / ((patient_df['height_cm'] / 100) ** 2)
         
-        # Age category
         def get_age_category(age):
             if age <= 30:
                 return 'Young'
@@ -1790,10 +2102,8 @@ async def predict(
         
         patient_df['age_category'] = patient_df['age'].apply(get_age_category)
         
-        # Platelet lymphocyte ratio
         patient_df['platelet_lymphocyte_ratio'] = patient_df['platelet_count'] / (patient_df['wbc_count'] * 0.3 + 1e-10)
         
-        # Lifestyle risk score
         def get_smoking_score(status):
             smoking_map = {'Never': 0, 'Former': 1, 'Current': 2}
             return smoking_map.get(status, 0)
@@ -1817,7 +2127,6 @@ async def predict(
             patient_df['diet_quality'].apply(get_diet_score)
         )
         
-        # Clinical risk score
         def calculate_clinical_risk(row):
             score = 0
             
@@ -1886,20 +2195,16 @@ async def predict(
         
         patient_df['clinical_risk_score'] = patient_df.apply(calculate_clinical_risk, axis=1)
         
-        # Make prediction
         model = models[model_name]
         
-        # If model is a pipeline, use it directly
         if hasattr(model, 'predict_proba'):
             prediction = model.predict(patient_df)[0]
             probability = model.predict_proba(patient_df)[0, 1]
         else:
-            # Preprocess data first
             processed_data = preprocessor.transform(patient_df)
             prediction = model.predict(processed_data)[0]
             probability = model.predict_proba(processed_data)[0, 1]
         
-        # Determine risk level
         if probability < 0.3:
             risk_level = "Low"
         elif probability < 0.7:
@@ -1923,14 +2228,6 @@ async def predict_batch(
     batch_data: BatchPatientData,
     model_name: str = "best_model"
 ):
-    """
-    Make cancer risk predictions for multiple patients
-    
-    - **batch_data**: List of patient data
-    - **model_name**: Model to use for prediction (default: best_model)
-    """
-    
-    # Check if model exists
     if model_name not in models:
         available_models = list(models.keys())
         raise HTTPException(
@@ -1958,10 +2255,8 @@ async def predict_batch(
         
         patient_df['age_category'] = patient_df['age'].apply(get_age_category)
         
-        # Platelet lymphocyte ratio
         patient_df['platelet_lymphocyte_ratio'] = patient_df['platelet_count'] / (patient_df['wbc_count'] * 0.3 + 1e-10)
         
-        # Lifestyle risk score
         def get_smoking_score(status):
             smoking_map = {'Never': 0, 'Former': 1, 'Current': 2}
             return smoking_map.get(status, 0)
@@ -1985,7 +2280,6 @@ async def predict_batch(
             patient_df['diet_quality'].apply(get_diet_score)
         )
         
-        # Clinical risk score
         def calculate_clinical_risk(row):
             score = 0
             
@@ -2054,7 +2348,6 @@ async def predict_batch(
         
         patient_df['clinical_risk_score'] = patient_df.apply(calculate_clinical_risk, axis=1)
         
-        # Make predictions
         model = models[model_name]
         
         if hasattr(model, 'predict_proba'):
@@ -2065,12 +2358,11 @@ async def predict_batch(
             predictions = model.predict(processed_data)
             probabilities = model.predict_proba(processed_data)[:, 1]
         
-        # Prepare response
         prediction_results = []
         positive_cases = 0
         
         for i, (pred, prob) in enumerate(zip(predictions, probabilities)):
-            # Determine risk level
+           
             if prob < 0.3:
                 risk_level = "Low"
             elif prob < 0.7:
@@ -2105,9 +2397,6 @@ async def predict_batch(
 
 @app.get("/models", response_model=List[ModelInfo], tags=["Models"])
 async def get_models():
-    """
-    Get information about all available models
-    """
     try:
         models_info = []
         
@@ -2137,9 +2426,7 @@ async def get_models():
 
 @app.get("/health", response_model=HealthCheck, tags=["Health"])
 async def health_check():
-    """
-    Check API health status
-    """
+    
     try:
         models_loaded = list(models.keys())
         
@@ -2196,5 +2483,224 @@ def main():
     # Run the API
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
+def generate_simple_prediction_report(output_file="final_prediction_report.csv"):
+    
+    print("\n" + "="*60)
+    print("GENERATING SIMPLE PREDICTION REPORT")
+    print("="*60)
+    
+    try:
+        
+        # 1. LOAD DATA AND MODEL
+        
+        print("\n[1/3] Loading data and model...")
+        
+        # Load the feature engineered dataset
+        df = pd.read_csv("AI_Thunderball_FeatureEngineeredDataset.csv")
+        print(f" Loaded dataset: {df.shape[0]} rows")
+        
+        # Check if patient_id exists
+        if 'patient_id' not in df.columns:
+            print(" No patient_id column found, creating sequential IDs")
+            df['patient_id'] = range(1000, 1000 + len(df))
+        
+        # Load the best model
+        try:
+            model = joblib.load('api_model_gradient_boosting.pkl')
+            print(f" Loaded model: Gradient Boosting")
+        except:
+            model = joblib.load('api_best_model.pkl')
+            print(f" Loaded model: Best Model")
+        
+        
+        # 2. GENERATE PREDICTIONS
+        
+        print("\n[2/3] Generating predictions...")
+        
+        # Get actual values and patient IDs
+        y_true = df["cancer"]
+        patient_ids = df["patient_id"]
+        
+        # Prepare features
+        X = df.drop(columns=["cancer", "patient_id"] if "patient_id" in df.columns else ["cancer"])
+        
+        # Make predictions
+        if hasattr(model, 'predict_proba'):
+            y_pred = model.predict(X)
+            y_prob = model.predict_proba(X)[:, 1]
+        else:
+            print(" Model doesn't have predict_proba method")
+            return None
+        
+        print(f" Predictions generated for {len(y_pred)} patients")
+        
+        
+        # 3. CREATE SIMPLE REPORT WITH ORIGINAL PATIENT IDs
+        
+        print("\n[3/3] Creating simple report...")
+        
+        # Create report with original patient IDs
+        report_df = pd.DataFrame({
+            'Patient_No': patient_ids,  # Using original patient_id from dataset
+            'Actual': y_true,
+            'Predicted': y_pred,
+            'Probability': np.round(y_prob, 4),
+            'Correct': (y_pred == y_true).astype(int)
+        })
+        
+        # Sort by Patient_No for consistency
+        report_df = report_df.sort_values('Patient_No').reset_index(drop=True)
+        
+        # Save to CSV
+        report_df.to_csv(output_file, index=False)
+        
+        print(f"\n Report saved: {output_file}")
+        print(f"  Shape: {report_df.shape[0]} rows × {report_df.shape[1]} columns")
+        print(f"  Patient IDs: {report_df['Patient_No'].min()} to {report_df['Patient_No'].max()}")
+        
+        # Display sample
+        print("\n" + "="*60)
+        print("SAMPLE OF REPORT (First 10 rows)")
+        print("="*60)
+        print("\n", report_df.head(10).to_string())
+        
+        # Display summary
+        print("\n" + "="*60)
+        print("SUMMARY STATISTICS")
+        print("="*60)
+        print(f"Total Patients: {len(report_df)}")
+        print(f"Actual Cancer Cases: {report_df['Actual'].sum()} ({report_df['Actual'].mean()*100:.1f}%)")
+        print(f"Predicted Cancer Cases: {report_df['Predicted'].sum()} ({report_df['Predicted'].mean()*100:.1f}%)")
+        print(f"Correct Predictions: {report_df['Correct'].sum()} ({report_df['Correct'].mean()*100:.1f}%)")
+        
+        # Confusion matrix
+        tn = ((report_df['Actual'] == 0) & (report_df['Predicted'] == 0)).sum()
+        fp = ((report_df['Actual'] == 0) & (report_df['Predicted'] == 1)).sum()
+        fn = ((report_df['Actual'] == 1) & (report_df['Predicted'] == 0)).sum()
+        tp = ((report_df['Actual'] == 1) & (report_df['Predicted'] == 1)).sum()
+        
+        print("\nConfusion Matrix:")
+        print(f"  True Negatives:  {tn}")
+        print(f"  False Positives: {fp}")
+        print(f"  False Negatives: {fn}")
+        print(f"  True Positives:  {tp}")
+        
+        # Verify original patient IDs are preserved
+        print("\n" + "="*60)
+        print("PATIENT ID VERIFICATION")
+        print("="*60)
+        print(f"Original patient IDs sample: {list(patient_ids.head())}")
+        print(f"Report patient IDs sample:   {list(report_df['Patient_No'].head())}")
+        
+        print("\n" + "="*60)
+        print(" REPORT GENERATED SUCCESSFULLY!")
+        print("="*60)
+        
+        return report_df
+        
+    except Exception as e:
+        print(f"\n Error generating report: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def generate_simple_prediction_report_with_custom_id(output_file="final_prediction_report.csv", 
+                                                     id_column="patient_id"):
+  
+    print("\n" + "="*60)
+    print(f"GENERATING SIMPLE PREDICTION REPORT (using '{id_column}')")
+    print("="*60)
+    
+    try:
+        # Load the feature engineered dataset
+        df = pd.read_csv("AI_Thunderball_FeatureEngineeredDataset.csv")
+        print(f" Loaded dataset: {df.shape[0]} rows")
+        
+        # Check if specified ID column exists
+        if id_column not in df.columns:
+            print(f"⚠ Column '{id_column}' not found. Available columns:")
+            print(f"   {list(df.columns)}")
+            
+            # Try common ID column names
+            possible_ids = ['patient_id', 'Patient_ID', 'id', 'ID', 'patientid']
+            found = False
+            for pid in possible_ids:
+                if pid in df.columns:
+                    id_column = pid
+                    print(f" Using '{id_column}' as patient ID column")
+                    found = True
+                    break
+            
+            if not found:
+                print(" No patient ID column found, creating sequential IDs")
+                df['patient_id'] = range(1000, 1000 + len(df))
+                id_column = 'patient_id'
+        
+        # Load the best model
+        try:
+            model = joblib.load('api_model_gradient_boosting.pkl')
+            print(f" Loaded model: Gradient Boosting")
+        except:
+            model = joblib.load('api_best_model.pkl')
+            print(f" Loaded model: Best Model")
+        
+        # Get actual values and patient IDs
+        y_true = df["cancer"]
+        patient_ids = df[id_column]
+        
+        # Prepare features
+        cols_to_drop = ["cancer"]
+        if id_column in df.columns:
+            cols_to_drop.append(id_column)
+        
+        X = df.drop(columns=cols_to_drop)
+        
+        # Make predictions
+        if hasattr(model, 'predict_proba'):
+            y_pred = model.predict(X)
+            y_prob = model.predict_proba(X)[:, 1]
+        else:
+            print(" Model doesn't have predict_proba method")
+            return None
+        
+        # Create report
+        report_df = pd.DataFrame({
+            'Patient_No': patient_ids,
+            'Actual': y_true,
+            'Predicted': y_pred,
+            'Probability': np.round(y_prob, 4),
+            'Correct': (y_pred == y_true).astype(int)
+        })
+        
+        # Sort by Patient_No
+        report_df = report_df.sort_values('Patient_No').reset_index(drop=True)
+        
+        # Save to CSV
+        report_df.to_csv(output_file, index=False)
+        
+        print(f"\n Report saved: {output_file}")
+        print(f"  Shape: {report_df.shape[0]} rows × {report_df.shape[1]} columns")
+        print(f"  Patient IDs: {report_df['Patient_No'].min()} to {report_df['Patient_No'].max()}")
+        
+        # Display sample
+        print("\n" + "="*60)
+        print("SAMPLE OF REPORT (First 10 rows)")
+        print("="*60)
+        print("\n", report_df.head(10).to_string())
+        
+        return report_df
+        
+    except Exception as e:
+        print(f"\n Error generating report: {str(e)}")
+        return None
+
+
+
+# Execute
 if __name__ == "__main__":
     main()
+    predictions_df, metrics = analyze_gradient_boosting_model()
+    report_df = generate_simple_prediction_report("final_prediction_report.csv")
+
+
