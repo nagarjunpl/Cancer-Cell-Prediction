@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: cancer-cell-prediction-api
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python "AI_Thunderball_Optimized Model Code.py"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.12

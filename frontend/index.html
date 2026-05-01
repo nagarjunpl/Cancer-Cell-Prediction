@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Thunderball — Cancer Risk Prediction</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div class="bg-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+  </div>
+
+  <div class="app-container">
+    <header>
+      <div class="brand">Cancer Risk Index</div>
+      <div id="api-status" class="info-value">
+        <span class="status-indicator status-offline"></span> Checking API...
+      </div>
+    </header>
+
+    <!-- Main Entry Form -->
+    <main>
+      <div class="card">
+        <div class="card-title">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path
+              d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+          </svg>
+          Patient Risk Assessment
+        </div>
+
+        <!-- Input Mode Toggle -->
+        <div class="mode-toggle">
+          <button type="button" class="mode-btn active" id="btn-upload" onclick="switchMode('upload')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Upload Report
+          </button>
+          <button type="button" class="mode-btn" id="btn-manual" onclick="switchMode('manual')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+            Manual Entry
+          </button>
+        </div>
+
+        <!-- Upload Zone -->
+        <div id="upload-zone" class="upload-zone">
+          <div class="upload-droparea" id="drop-area">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" style="color: var(--primary); margin-bottom: 1rem;">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+            <p class="upload-title">Drag & drop your patient report</p>
+            <p class="upload-subtitle">Accepts <strong>CSV</strong> or <strong>JSON</strong> files with patient
+              attributes</p>
+            <label class="upload-browse-btn">
+              Browse Files
+              <input type="file" id="file-input" accept=".csv,.json" hidden>
+            </label>
+          </div>
+          <div id="upload-status" class="upload-status" style="display:none;"></div>
+        </div>
+
+        <form id="prediction-form" class="form-grid" style="display:none;">
+          <!-- Section 1: Demographics -->
+          <div class="section-divider">
+            <span class="section-label">Demographics</span>
+          </div>
+
+          <div class="input-group">
+            <label for="age">Age</label>
+            <input type="number" id="age" name="age" min="1" max="120" required placeholder="e.g. 45">
+          </div>
+
+          <div class="input-group">
+            <label for="gender">Gender</label>
+            <select id="gender" name="gender" required>
+              <option value="" disabled selected>Select gender</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="ethnicity">Ethnicity</label>
+            <select id="ethnicity" name="ethnicity" required>
+              <option value="" disabled selected>Select ethnicity</option>
+              <option value="Asian">Asian</option>
+              <option value="African">African</option>
+              <option value="Caucasian">Caucasian</option>
+              <option value="Hispanic">Hispanic</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="blood_group">Blood Group</label>
+            <select id="blood_group" name="blood_group" required>
+              <option value="" disabled selected>Select blood type</option>
+              <option value="A+">A+</option>
+              <option value="A-">A-</option>
+              <option value="B+">B+</option>
+              <option value="B-">B-</option>
+              <option value="AB+">AB+</option>
+              <option value="AB-">AB-</option>
+              <option value="O+">O+</option>
+              <option value="O-">O-</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="height_cm">Height (cm)</label>
+            <input type="number" id="height_cm" name="height_cm" min="50" max="250" required placeholder="170">
+          </div>
+
+          <div class="input-group">
+            <label for="weight_kg">Weight (kg)</label>
+            <input type="number" id="weight_kg" name="weight_kg" step="0.1" min="10" max="300" required
+              placeholder="70.5">
+          </div>
+
+          <!-- Section 2: Lifestyle & History -->
+          <div class="section-divider">
+            <span class="section-label">Lifestyle & History</span>
+          </div>
+
+          <div class="input-group">
+            <label for="smoking_status">Smoking Status</label>
+            <select id="smoking_status" name="smoking_status" required>
+              <option value="Never">Never</option>
+              <option value="Former">Former</option>
+              <option value="Current">Current</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="alcohol_consumption">Alcohol Consumption</label>
+            <select id="alcohol_consumption" name="alcohol_consumption" required>
+              <option value="Never">Never</option>
+              <option value="Moderate">Moderate</option>
+              <option value="High">High</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="physical_activity_level">Physical Activity</label>
+            <select id="physical_activity_level" name="physical_activity_level" required>
+              <option value="Low">Low</option>
+              <option value="Medium">Medium</option>
+              <option value="High">High</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="diet_quality">Diet Quality</label>
+            <select id="diet_quality" name="diet_quality" required>
+              <option value="Poor">Poor</option>
+              <option value="Average">Average</option>
+              <option value="Good">Good</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="family_history_cancer">Family History of Cancer</label>
+            <select id="family_history_cancer" name="family_history_cancer" required>
+              <option value="0">No</option>
+              <option value="1">Yes</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="prior_radiation_exposure">Radiation Exposure</label>
+            <select id="prior_radiation_exposure" name="prior_radiation_exposure" required>
+              <option value="0">No</option>
+              <option value="1">Yes</option>
+            </select>
+          </div>
+
+          <!-- Section 3: Clinical Information -->
+          <div class="section-divider">
+            <span class="section-label">Medical Conditions & Symptoms</span>
+          </div>
+
+          <div class="input-group">
+            <label>Co-morbidities</label>
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+              <label style="font-weight: 400;"><input type="checkbox" id="diabetes" value="1"> Diabetes</label>
+              <label style="font-weight: 400;"><input type="checkbox" id="hypertension" value="1"> Hypertension</label>
+              <label style="font-weight: 400;"><input type="checkbox" id="asthma" value="1"> Asthma</label>
+              <label style="font-weight: 400;"><input type="checkbox" id="cardiac_disease" value="1"> Cardiac</label>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label>Presenting Symptoms</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+              <label style="font-weight: 400;"><input type="checkbox" id="unexplained_weight_loss" value="1"> Weight
+                Loss</label>
+              <label style="font-weight: 400;"><input type="checkbox" id="persistent_fatigue" value="1"> Fatigue</label>
+              <label style="font-weight: 400;"><input type="checkbox" id="chronic_pain" value="1"> Chronic Pain</label>
+              <label style="font-weight: 400;"><input type="checkbox" id="abnormal_bleeding" value="1"> Bleeding</label>
+              <label style="font-weight: 400;"><input type="checkbox" id="persistent_cough" value="1"> Persistent
+                Cough</label>
+              <label style="font-weight: 400;"><input type="checkbox" id="lump_presence" value="1"> Lump Present</label>
+            </div>
+          </div>
+
+          <!-- Section 4: Laboratory Results -->
+          <div class="section-divider">
+            <span class="section-label">Laboratory & Imaging</span>
+          </div>
+
+          <div class="input-group">
+            <label for="hemoglobin_level">Hemoglobin Level (g/dL)</label>
+            <input type="number" id="hemoglobin_level" name="hemoglobin_level" step="0.1" required placeholder="14.0">
+          </div>
+
+          <div class="input-group">
+            <label for="wbc_count">WBC Count (/µL)</label>
+            <input type="number" id="wbc_count" name="wbc_count" required placeholder="7500">
+          </div>
+
+          <div class="input-group">
+            <label for="platelet_count">Platelet Count (/µL)</label>
+            <input type="number" id="platelet_count" name="platelet_count" required placeholder="250000">
+          </div>
+
+          <div class="input-group">
+            <label for="tumor_marker_level">Tumor Marker Level</label>
+            <input type="number" id="tumor_marker_level" name="tumor_marker_level" step="0.01" required
+              placeholder="5.2">
+          </div>
+
+
+
+          <div class="input-group">
+            <label for="imaging_abnormality">Imaging Abnormality</label>
+            <select id="imaging_abnormality" name="imaging_abnormality" required>
+              <option value="0">No</option>
+              <option value="1">Yes</option>
+            </select>
+          </div>
+
+          <button type="submit" class="btn-primary" id="submit-btn">
+            Analyze Patient Data
+          </button>
+        </form>
+      </div>
+    </main>
+
+    <!-- Sidebar Results & Info -->
+    <aside>
+      <div class="card prediction-card" id="result-card">
+        <div class="placeholder-text" id="initial-placeholder">
+          <p style="color: var(--text-muted);">Enter data and click analyze to see results</p>
+        </div>
+
+        <div id="result-display" style="display: none; width: 100%; text-align: center;">
+          <div id="risk-circle" class="risk-display risk-low" style="margin-left: auto; margin-right: auto;">
+            <span class="risk-value" id="risk-score">24%</span>
+            <span class="risk-label" id="risk-text">Low Risk</span>
+          </div>
+          <p id="prediction-msg" style="margin-top: 1rem; font-weight: 500;"></p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 1.5rem;">
+        <div class="card-title">Analysis Settings</div>
+
+        <div class="info-item">
+          <span class="info-label">Active Model</span>
+          <span id="active-model-display" class="info-value" style="font-weight:600; color:var(--primary-dark)">Random
+            Forest (Best Model)</span>
+        </div>
+
+        <div class="info-item">
+          <span class="info-label">System Performance</span>
+          <span class="info-value" id="system-perf">---</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
